@@ -11,6 +11,8 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "pack": "electron-vite build && electron-builder --win portable",
+    "build:mac-audio": "node scripts/build-macos-audio.mjs",
+    "pack:mac": "npm run build:mac-audio && electron-vite build && electron-builder --mac",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "build": {
@@ -26,13 +28,13 @@
       "out/**/*",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "native/bin/SystemAudioCapture.exe",
-        "to": "SystemAudioCapture.exe"
-      }
-    ],
     "win": {
+      "extraResources": [
+        {
+          "from": "native/bin/SystemAudioCapture.exe",
+          "to": "SystemAudioCapture.exe"
+        }
+      ],
       "target": [
         {
           "target": "portable",
@@ -44,6 +46,33 @@
     },
     "portable": {
       "artifactName": "Welfare Office.exe"
+    },
+    "mac": {
+      "minimumSystemVersion": "14.2.0",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "extraFiles": [
+        {
+          "from": "native/bin/macos/SystemAudioCapture.app",
+          "to": "Frameworks/SystemAudioCapture.app"
+        }
+      ],
+      "extendInfo": {
+        "NSScreenCaptureUsageDescription": "Welfare Office captures the screen or window you choose when you share.",
+        "NSAudioCaptureUsageDescription": "Welfare Office captures system audio when you enable audio sharing."
+      }
     }
   },
   "dependencies": {
