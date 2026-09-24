@@ -1,0 +1,60 @@
+{
+  "name": "sharescreen",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "productName": "Welfare Office",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "postinstall": "node ./node_modules/electron/install.js",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "pack": "electron-vite build && electron-builder --win portable",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+  },
+  "build": {
+    "appId": "app.sharescreen",
+    "productName": "Welfare Office",
+    "executableName": "WelfareOffice",
+    "asar": true,
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "native/bin/SystemAudioCapture.exe",
+        "to": "SystemAudioCapture.exe"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "Welfare Office.exe"
+    }
+  },
+  "dependencies": {
+    "livekit-client": "^2.22.3",
+    "livekit-server-sdk": "^2.19.1"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  }
+}
