@@ -1,4 +1,4 @@
-import { desktopCapturer, session, type DesktopCapturerSource } from 'electron'
+import { desktopCapturer, session, systemPreferences, type DesktopCapturerSource } from 'electron'
 import type { DesktopSourceInfo, ShareRequest } from '../shared/types'
 
 interface PendingShare {
@@ -41,6 +41,9 @@ export async function listSources(): Promise<DesktopSourceInfo[]> {
     thumbnailSize: { width: 360, height: 202 },
     fetchWindowIcons: false,
   })
+  if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') === 'denied') {
+    throw new Error('Screen Recording permission is disabled. Enable it in System Settings > Privacy & Security > Screen Recording, then reopen Welfare Office.')
+  }
   return sources
     .filter((source) => !isOwnWindow(source.name))
     .sort(compareSources)

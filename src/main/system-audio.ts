@@ -19,7 +19,9 @@ export function stopSystemAudio(): void {
 }
 
 export function startSystemAudio(sender: WebContents): Promise<void> {
-  if (process.platform !== 'win32') throw new Error('System audio capture requires Windows')
+  if (process.platform !== 'win32' && process.platform !== 'darwin') {
+    throw new Error('System audio capture requires Windows or macOS')
+  }
   stopSystemAudio()
   const executable = executablePath()
   if (!existsSync(executable)) throw new Error('System audio capture is missing')
@@ -49,6 +51,17 @@ export function startSystemAudio(sender: WebContents): Promise<void> {
 }
 
 function executablePath(): string {
+  if (process.platform === 'darwin') {
+    const candidates = [
+      join(process.resourcesPath, '..', 'Frameworks', 'SystemAudioCapture.app', 'Contents', 'MacOS', 'SystemAudioCapture'),
+      join(app.getAppPath(), 'native', 'bin', 'macos', 'SystemAudioCapture.app', 'Contents', 'MacOS', 'SystemAudioCapture'),
+      join(process.cwd(), 'native', 'bin', 'macos', 'SystemAudioCapture.app', 'Contents', 'MacOS', 'SystemAudioCapture'),
+    ]
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) return candidate
+    }
+    return candidates[0] ?? ''
+  }
   const candidates = [
     join(process.resourcesPath, 'SystemAudioCapture.exe'),
     join(app.getAppPath(), 'native', 'bin', 'SystemAudioCapture.exe'),
@@ -75,7 +88,7 @@ function waitUntilReady(proc: ChildProcess, stderr: NodeJS.ReadableStream): Prom
     }
     timer = setTimeout(() => {
       finish(new Error('System audio capture timed out'))
-    }, 8000)
+    }, process.platform === 'darwin' ? 60000 : 8000)
     stderr.on('data', (chunk: Buffer) => {
       const piece = chunk.toString('utf8')
       text += piece
