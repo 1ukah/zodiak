@@ -1,27 +1,15 @@
-node_modules/
-out/
 dist/
-release/
-
-native/bin/
 *.exe
 *.dll
 *.pdb
 *.obj
 *.ilk
-*.blockmap
 
 .env
 .env.*
 config.json
 
 *.log
-npm-debug.log*
-.npm/
-
-*.tsbuildinfo
-.eslintcache
-coverage/
 
 .DS_Store
 Thumbs.db
@@ -31,3 +19,5 @@ Desktop.ini
 *.suo
 *.user
 .vs/
+
+vendor/
