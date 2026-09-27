@@ -12,7 +12,7 @@
     "start": "electron-vite preview",
     "build:system-audio-capture": "dotnet publish native/system-audio-capture/SystemAudioCapture.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o native/system-audio-capture/publish",
     "version:sync": "node scripts/sync-version.cjs",
-    "pack": "npm run build:system-audio-capture && electron-vite build && electron-builder --win nsis",
+    "pack": "npm run build:system-audio-capture && electron-vite build && electron-builder --win nsis --publish never",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:ui": "electron tests/ui-smoke.cjs",
     "test:startup": "npm run build && electron tests/startup-smoke.cjs"
