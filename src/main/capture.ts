@@ -3,6 +3,7 @@ import type { DesktopSourceInfo, ShareRequest } from '../shared/types'
 
 interface PendingShare {
   sourceId: string
+  withAudio: boolean
 }
 
 let pending: PendingShare | null = null
@@ -23,7 +24,12 @@ export function registerCaptureHandler(): void {
           callback({})
           return
         }
-        callback({ video: { id: match.id, name: match.name } })
+        callback({
+          video: { id: match.id, name: match.name },
+          // Electron's Chromium capture path provides system loopback audio. It is
+          // intentionally used instead of a separately compiled Windows helper.
+          audio: current.withAudio && request.audioRequested ? 'loopback' : undefined,
+        })
       })
       .catch(() => {
         callback({})
@@ -32,7 +38,7 @@ export function registerCaptureHandler(): void {
 }
 
 export function armCapture(request: ShareRequest): void {
-  pending = { sourceId: request.sourceId }
+  pending = { sourceId: request.sourceId, withAudio: request.withAudio }
 }
 
 export async function listSources(): Promise<DesktopSourceInfo[]> {
@@ -48,7 +54,7 @@ export async function listSources(): Promise<DesktopSourceInfo[]> {
 }
 
 function isOwnWindow(name: string): boolean {
-  return name === 'Welfare Office' || name.startsWith('Welfare Office')
+  return name === 'zodiak' || name.startsWith('zodiak')
 }
 
 function compareSources(a: DesktopCapturerSource, b: DesktopCapturerSource): number {

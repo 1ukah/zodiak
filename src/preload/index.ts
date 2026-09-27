@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { channels, type SharescreenApi } from '../shared/types'
 
 const api = {
+  rendererReady: () => ipcRenderer.send(channels.rendererReady),
   getConfig: () => ipcRenderer.invoke(channels.getConfig),
   saveConfig: (config) => ipcRenderer.invoke(channels.saveConfig, config),
   createToken: (request) => ipcRenderer.invoke(channels.createToken, request),
@@ -18,9 +19,7 @@ const api = {
       if (payload instanceof Uint8Array) listener(payload)
     }
     ipcRenderer.on(channels.systemAudioData, wrapped)
-    return () => {
-      ipcRenderer.removeListener(channels.systemAudioData, wrapped)
-    }
+    return () => ipcRenderer.removeListener(channels.systemAudioData, wrapped)
   },
 } satisfies SharescreenApi
 
