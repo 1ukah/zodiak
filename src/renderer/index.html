@@ -32,6 +32,7 @@
       <div id="stage" class="is-idle">
         <video id="stage-video" autoplay playsinline muted></video><div id="stream-grid" aria-label="Live screen shares" hidden></div><div id="participant-grid" aria-label="Participants" hidden></div>
         <div id="waiting" role="status" aria-label="Select a room"><span data-icon="monitor"></span><p id="waiting-message" hidden></p></div>
+        <label id="focused-stream-volume" class="focused-stream-volume" for="focused-stream-volume-input" hidden><span data-icon="volume"></span><input id="focused-stream-volume-input" type="range" min="0" max="100" value="100" aria-label="Selected stream volume" /><output id="focused-stream-volume-value" for="focused-stream-volume-input">100%</output></label>
         <button id="exit-focus" class="control-button" title="Exit focus (Esc)" aria-label="Exit focus" hidden><span data-icon="focus"></span></button>
         <p id="stage-note" class="note" role="alert" hidden></p><div id="stream-metrics" hidden><span id="tx-metrics"></span><span id="rx-metrics"></span></div>
       </div>

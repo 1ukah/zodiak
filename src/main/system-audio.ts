@@ -16,22 +16,23 @@ export function stopSystemAudio(): void {
   if (!proc.killed) proc.kill()
 }
 
-export function startSystemAudio(sender: WebContents): Promise<void> {
-  if (process.platform !== 'win32') throw new Error('Discord exclusion requires Windows')
+export function startSystemAudio(sender: WebContents, excludeDiscord: boolean): Promise<void> {
+  if (process.platform !== 'win32') throw new Error('Protected system-audio capture requires Windows')
   stopSystemAudio()
   const executable = helperPath()
-  if (!existsSync(executable)) throw new Error('Discord-exclusion audio helper is missing')
-  const proc = spawn(executable, [], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+  if (!existsSync(executable)) throw new Error('Protected system-audio helper is missing')
+  const args = excludeDiscord ? [String(process.pid), 'discord'] : [String(process.pid)]
+  const proc = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
   capture = proc; owner = sender
   const stdout = proc.stdout; const stderr = proc.stderr
-  if (!stdout || !stderr) { stopSystemAudio(); throw new Error('Discord-exclusion audio capture failed') }
+  if (!stdout || !stderr) { stopSystemAudio(); throw new Error('Protected system-audio capture failed') }
   stdout.on('data', (chunk: Buffer) => {
     if (capture === proc && owner && !owner.isDestroyed()) owner.send(channels.systemAudioData, chunk)
   })
   sender.once('destroyed', () => { if (owner === sender) stopSystemAudio() })
   return waitReady(proc, stderr).catch((error: unknown) => {
     if (capture === proc) stopSystemAudio()
-    throw error instanceof Error ? error : new Error('Discord-exclusion audio capture failed')
+    throw error instanceof Error ? error : new Error('Protected system-audio capture failed')
   })
 }
 
@@ -47,7 +48,7 @@ function waitReady(proc: ChildProcess, stderr: NodeJS.ReadableStream): Promise<v
   return new Promise((resolve, reject) => {
     let text = ''; let done = false
     const finish = (error?: Error): void => { if (done) return; done = true; clearTimeout(timer); error ? reject(error) : resolve() }
-    const timer = setTimeout(() => finish(new Error('Discord-exclusion audio capture timed out')), 8_000)
+    const timer = setTimeout(() => finish(new Error('Protected system-audio capture timed out')), 8_000)
     stderr.on('data', (chunk: Buffer) => {
       text += chunk.toString()
       if (text.split(/\r?\n/).some((line) => line.startsWith('ready '))) finish()

@@ -12,7 +12,7 @@ const api = {
   listSources: () => ipcRenderer.invoke(channels.listSources),
   prepareShare: (request) => ipcRenderer.invoke(channels.prepareShare, request),
   setSharing: (active) => ipcRenderer.invoke(channels.setSharing, active),
-  startSystemAudio: () => ipcRenderer.invoke(channels.startSystemAudio),
+  startSystemAudio: (excludeDiscord) => ipcRenderer.invoke(channels.startSystemAudio, excludeDiscord),
   stopSystemAudio: () => ipcRenderer.invoke(channels.stopSystemAudio),
   onSystemAudio: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown): void => {
@@ -20,6 +20,14 @@ const api = {
     }
     ipcRenderer.on(channels.systemAudioData, wrapped)
     return () => ipcRenderer.removeListener(channels.systemAudioData, wrapped)
+  },
+  setWindowFullscreen: (active) => ipcRenderer.invoke(channels.setWindowFullscreen, active),
+  onWindowFullscreenChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, active: unknown): void => {
+      if (typeof active === 'boolean') listener(active)
+    }
+    ipcRenderer.on(channels.windowFullscreenChanged, wrapped)
+    return () => ipcRenderer.removeListener(channels.windowFullscreenChanged, wrapped)
   },
 } satisfies SharescreenApi
 

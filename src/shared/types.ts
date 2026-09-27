@@ -45,7 +45,7 @@ export interface DesktopSourceInfo {
 export interface ShareRequest {
   sourceId: string
   withAudio: boolean
-  /** Capture Windows loopback with Discord's process tree excluded. */
+  /** Temporarily blocks Discord audio from a system-audio share. */
   blockDiscordAudio: boolean
 }
 
@@ -88,6 +88,8 @@ export const channels = {
   startSystemAudio: 'audio:start',
   stopSystemAudio: 'audio:stop',
   systemAudioData: 'audio:data',
+  setWindowFullscreen: 'window:set-fullscreen',
+  windowFullscreenChanged: 'window:fullscreen-changed',
 } as const
 
 export interface SharescreenApi {
@@ -101,7 +103,9 @@ export interface SharescreenApi {
   listSources: () => Promise<ActionResult<DesktopSourceInfo[]>>
   prepareShare: (request: ShareStartRequest) => Promise<ActionResult<true>>
   setSharing: (active: boolean) => Promise<ActionResult<true>>
-  startSystemAudio: () => Promise<ActionResult<true>>
+  startSystemAudio: (excludeDiscord: boolean) => Promise<ActionResult<true>>
   stopSystemAudio: () => Promise<ActionResult<true>>
   onSystemAudio: (listener: (pcm: Uint8Array) => void) => () => void
+  setWindowFullscreen: (active: boolean) => Promise<ActionResult<boolean>>
+  onWindowFullscreenChanged: (listener: (active: boolean) => void) => () => void
 }

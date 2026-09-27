@@ -94,6 +94,11 @@ function createWindow(splash: BrowserWindow | null = null): void {
   })
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  const notifyFullscreen = (active: boolean): void => {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channels.windowFullscreenChanged, active)
+  }
+  win.on('enter-full-screen', () => notifyFullscreen(true))
+  win.on('leave-full-screen', () => notifyFullscreen(false))
   win.webContents.on('will-navigate', (event, url) => {
     const devUrl = process.env.ELECTRON_RENDERER_URL
     if (devUrl && url.startsWith(devUrl)) return
@@ -211,7 +216,9 @@ function registerIpc(): void {
   ipcMain.handle(channels.prepareShare, (_event, payload: unknown) =>
     settle(async () => {
       const request = parseShareRequest(payload)
-      armCapture({ ...request, withAudio: request.withAudio && !request.blockDiscordAudio })
+      // System audio always uses the protected WASAPI track, which excludes
+      // this app's process tree and prevents remote stream audio from looping.
+      armCapture({ ...request, withAudio: false })
       return true as const
     }),
   )
@@ -223,11 +230,25 @@ function registerIpc(): void {
       return true as const
     }),
   )
-  ipcMain.handle(channels.startSystemAudio, (event) => settle(() => startSystemAudio(event.sender)))
+  ipcMain.handle(channels.startSystemAudio, (event, excludeDiscord: unknown) =>
+    settle(() => {
+      if (typeof excludeDiscord !== 'boolean') throw new Error('Invalid Discord audio option')
+      return startSystemAudio(event.sender, excludeDiscord)
+    }),
+  )
   ipcMain.handle(channels.stopSystemAudio, () =>
     settle(async () => {
       stopSystemAudio()
       return true as const
+    }),
+  )
+  ipcMain.handle(channels.setWindowFullscreen, (event, payload: unknown) =>
+    settle(async () => {
+      if (typeof payload !== 'boolean') throw new Error('Invalid fullscreen state')
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win || win.isDestroyed()) throw new Error('Application window is unavailable')
+      win.setFullScreen(payload)
+      return payload
     }),
   )
 }

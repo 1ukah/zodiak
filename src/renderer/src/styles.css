@@ -1261,6 +1261,38 @@ details summary span {
   z-index: 2;
   background: #25232fe6;
 }
+.focused-stream-volume {
+  position: absolute;
+  right: 24px;
+  bottom: 20px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(250px,calc(100% - 48px));
+  padding: 9px 12px;
+  border: 1px solid #3a3947;
+  border-radius: 9px;
+  background: #191a20e6;
+  color: var(--text);
+  backdrop-filter: blur(8px);
+}
+.focused-stream-volume .icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+.focused-stream-volume input {
+  min-width: 0;
+  flex: 1;
+  accent-color: var(--accent);
+}
+.focused-stream-volume output {
+  min-width: 36px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
 body.theater #shell {
   grid-template-columns: minmax(0,1fr);
 }
