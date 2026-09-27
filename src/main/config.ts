@@ -5,7 +5,7 @@ import type { AppConfig } from '../shared/types'
 import { isRecord } from './parse'
 
 const DEFAULT_CONFIG: AppConfig = {
-  url: 'ws://179.90.226.218:7880',
+  url: 'ws://192.168.15.2:7880',
   apiKey: 'devkey',
   apiSecret: 'secret',
   displayName: '',

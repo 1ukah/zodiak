@@ -1,22 +1,25 @@
 {
-  "name": "sharescreen",
+  "name": "zodiak",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "productName": "Welfare Office",
+  "productName": "zodiak",
   "main": "./out/main/index.js",
   "scripts": {
     "postinstall": "node ./node_modules/electron/install.js",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "pack": "electron-vite build && electron-builder --win portable",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+    "build:system-audio-capture": "dotnet publish native/system-audio-capture/SystemAudioCapture.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o native/system-audio-capture/publish",
+    "pack": "npm run build:system-audio-capture && electron-vite build && electron-builder --win nsis",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test:ui": "electron tests/ui-smoke.cjs",
+    "test:startup": "npm run build && electron tests/startup-smoke.cjs"
   },
   "build": {
-    "appId": "app.sharescreen",
-    "productName": "Welfare Office",
-    "executableName": "WelfareOffice",
+    "appId": "app.zodiak",
+    "productName": "zodiak",
+    "executableName": "zodiak",
     "asar": true,
     "npmRebuild": false,
     "directories": {
@@ -28,27 +31,41 @@
     ],
     "extraResources": [
       {
-        "from": "native/bin/SystemAudioCapture.exe",
-        "to": "SystemAudioCapture.exe"
+        "from": "build/app-icon.png",
+        "to": "app-icon.png"
+      },
+      {
+        "from": "native/system-audio-capture/publish/SystemAudioCapture.exe",
+        "to": "system-audio-capture/SystemAudioCapture.exe"
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
       ]
     },
-    "portable": {
-      "artifactName": "Welfare Office.exe"
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh",
+      "artifactName": "zodiak-setup.exe"
     }
   },
   "dependencies": {
     "livekit-client": "^2.22.3",
-    "livekit-server-sdk": "^2.19.1"
+    "livekit-server-sdk": "^2.19.1",
+    "lucide": "^1.48.0"
   },
   "devDependencies": {
     "electron": "^44.4.5",

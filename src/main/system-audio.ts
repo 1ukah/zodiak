@@ -12,96 +12,47 @@ export function stopSystemAudio(): void {
   capture = null
   owner = null
   if (!proc) return
-  proc.stdout?.removeAllListeners()
-  proc.stderr?.removeAllListeners()
-  proc.removeAllListeners()
+  proc.stdout?.removeAllListeners(); proc.stderr?.removeAllListeners(); proc.removeAllListeners()
   if (!proc.killed) proc.kill()
 }
 
 export function startSystemAudio(sender: WebContents): Promise<void> {
-  if (process.platform !== 'win32') throw new Error('System audio capture requires Windows')
+  if (process.platform !== 'win32') throw new Error('Discord exclusion requires Windows')
   stopSystemAudio()
-  const executable = executablePath()
-  if (!existsSync(executable)) throw new Error('System audio capture is missing')
-  const proc = spawn(executable, [], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  })
-  capture = proc
-  owner = sender
-  const stdout = proc.stdout
-  const stderr = proc.stderr
-  if (!stdout || !stderr) {
-    stopSystemAudio()
-    throw new Error('System audio capture failed')
-  }
+  const executable = helperPath()
+  if (!existsSync(executable)) throw new Error('Discord-exclusion audio helper is missing')
+  const proc = spawn(executable, [], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+  capture = proc; owner = sender
+  const stdout = proc.stdout; const stderr = proc.stderr
+  if (!stdout || !stderr) { stopSystemAudio(); throw new Error('Discord-exclusion audio capture failed') }
   stdout.on('data', (chunk: Buffer) => {
-    if (capture !== proc || !owner || owner.isDestroyed()) return
-    owner.send(channels.systemAudioData, chunk)
+    if (capture === proc && owner && !owner.isDestroyed()) owner.send(channels.systemAudioData, chunk)
   })
-  sender.once('destroyed', () => {
-    if (owner === sender) stopSystemAudio()
-  })
-  return waitUntilReady(proc, stderr).catch((error: unknown) => {
+  sender.once('destroyed', () => { if (owner === sender) stopSystemAudio() })
+  return waitReady(proc, stderr).catch((error: unknown) => {
     if (capture === proc) stopSystemAudio()
-    throw error instanceof Error ? error : new Error('System audio capture failed')
+    throw error instanceof Error ? error : new Error('Discord-exclusion audio capture failed')
   })
 }
 
-function executablePath(): string {
+function helperPath(): string {
   const candidates = [
-    join(process.resourcesPath, 'SystemAudioCapture.exe'),
-    join(app.getAppPath(), 'native', 'bin', 'SystemAudioCapture.exe'),
-    join(process.cwd(), 'native', 'bin', 'SystemAudioCapture.exe'),
+    join(process.resourcesPath, 'system-audio-capture', 'SystemAudioCapture.exe'),
+    join(app.getAppPath(), 'native', 'system-audio-capture', 'publish', 'SystemAudioCapture.exe'),
   ]
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate
-  }
-  return candidates[0] ?? ''
+  return candidates.find(existsSync) ?? candidates[0]
 }
 
-function waitUntilReady(proc: ChildProcess, stderr: NodeJS.ReadableStream): Promise<void> {
+function waitReady(proc: ChildProcess, stderr: NodeJS.ReadableStream): Promise<void> {
   return new Promise((resolve, reject) => {
-    let settled = false
-    let text = ''
-    let pending = ''
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const finish = (error?: Error): void => {
-      if (settled) return
-      settled = true
-      if (timer !== undefined) clearTimeout(timer)
-      if (error) reject(error)
-      else resolve()
-    }
-    timer = setTimeout(() => {
-      finish(new Error('System audio capture timed out'))
-    }, 8000)
+    let text = ''; let done = false
+    const finish = (error?: Error): void => { if (done) return; done = true; clearTimeout(timer); error ? reject(error) : resolve() }
+    const timer = setTimeout(() => finish(new Error('Discord-exclusion audio capture timed out')), 8_000)
     stderr.on('data', (chunk: Buffer) => {
-      const piece = chunk.toString('utf8')
-      text += piece
-      pending += piece
-      const lines = pending.split(/\r?\n/)
-      pending = lines.pop() ?? ''
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (trimmed.startsWith('note ') || trimmed.startsWith('ready ')) console.info(trimmed)
-        if (trimmed.startsWith('ready ')) finish()
-      }
+      text += chunk.toString()
+      if (text.split(/\r?\n/).some((line) => line.startsWith('ready '))) finish()
     })
-    proc.on('error', (error) => {
-      finish(error)
-    })
-    proc.on('exit', (code) => {
-      if (capture === proc) {
-        capture = null
-        owner = null
-      }
-      const detail = text
-        .split(/\r?\n/)
-        .map((entry) => entry.trim())
-        .find((entry) => entry.startsWith('error'))
-      const message = detail ? detail.replace(/^error\s+/, '') : ''
-      finish(new Error(message || `System audio capture exited (${code ?? 'unknown'})`))
-    })
+    proc.once('error', finish)
+    proc.once('exit', (code) => finish(new Error(text.match(/error\s+(.+)/)?.[1] ?? `Audio capture exited (${code ?? 'unknown'})`)))
   })
 }

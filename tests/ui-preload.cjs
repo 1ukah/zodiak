@@ -1,0 +1,14 @@
+const { contextBridge } = require('electron')
+let config = { url: 'ws://localhost:7880', apiKey: 'test', apiSecret: 'test', displayName: 'Alex Morgan' }
+let rooms = [{ name: 'the-lounge', participants: 3, sharing: false }, { name: 'watch-party', participants: 2, sharing: true }, { name: 'after-hours', participants: 0, sharing: false }]
+let serverAvailable = true
+const ok = value => Promise.resolve({ ok: true, value })
+contextBridge.exposeInMainWorld('sharescreen', {
+  rendererReady() {}, getConfig: () => Promise.resolve(config),
+  saveConfig: next => { config = next; return ok(config) },
+  listRooms: () => serverAvailable ? ok(rooms) : Promise.resolve({ ok: false, error: 'Server unavailable' }), setTestServerAvailable: value => { serverAvailable = Boolean(value) }, createRoom: ({ name }) => { const room = { name, participants: 0, sharing: false }; rooms.push(room); return ok(room) },
+  deleteRoom: ({ name }) => { rooms = rooms.filter(r => r.name !== name); return ok(true) },
+  createToken: ({ room }) => ok({ url: config.url, token: 'ui-test', identity: 'me', room, role: 'viewer' }),
+  listSources: () => ok([{ id: 'screen:1', name: 'Entire screen', thumbnail: '' }, { id: 'window:1', name: 'Browser window', thumbnail: '' }]),
+  prepareShare: () => ok(true), setSharing: () => ok(true), startSystemAudio: () => ok(true), stopSystemAudio: () => ok(true), onSystemAudio: () => () => {},
+})

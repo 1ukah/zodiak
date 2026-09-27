@@ -1,32 +1,85 @@
-import { app, BrowserWindow, ipcMain, nativeImage, powerSaveBlocker, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, powerSaveBlocker, session } from 'electron'
 import { join } from 'node:path'
-import { channels, type ShareRequest } from '../shared/types'
+import { channels, type ShareFrameRate, type ShareResolution, type ShareStartRequest } from '../shared/types'
 import { armCapture, listSources, registerCaptureHandler } from './capture'
+import { startSystemAudio, stopSystemAudio } from './system-audio'
 import { loadConfig, saveConfig } from './config'
 import { isRecord } from './parse'
 import { settle } from './result'
 import { createLiveRoom, deleteLiveRoom, listLiveRooms } from './rooms'
-import { startSystemAudio, stopSystemAudio } from './system-audio'
 import { createParticipantToken } from './tokens'
+
+app.setName('zodiak')
+if (process.platform === 'win32') app.setAppUserModelId('app.zodiak')
+
+// Installed builds keep every app-managed file next to the executable, inside
+// the directory the user selected in the installer. Development keeps its
+// isolated profile so tests and local work never touch an installed profile.
+if (app.isPackaged) {
+  const dataDirectory = join(process.resourcesPath, '..', 'data')
+  app.setPath('userData', dataDirectory)
+  app.setPath('sessionData', join(dataDirectory, 'session'))
+  app.setPath('logs', join(dataDirectory, 'logs'))
+  app.setPath('crashDumps', join(dataDirectory, 'crash-dumps'))
+}
 
 let sleepBlocker: number | null = null
 
-function blankIcon() {
-  const size = 16
-  return nativeImage.createFromBitmap(Buffer.alloc(size * size * 4), { width: size, height: size })
+function appIcon() {
+  return nativeImage.createFromPath(app.isPackaged
+    ? join(process.resourcesPath, 'app-icon.png')
+    : join(__dirname, '../../build/app-icon.png'))
 }
 
-function createWindow(): void {
+function createSplash(): BrowserWindow {
+  const splash = new BrowserWindow({
+    width: 360,
+    height: 220,
+    show: false,
+    frame: false,
+    resizable: false,
+    backgroundColor: '#14151a',
+    title: 'zodiak',
+    icon: appIcon(),
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  })
+  splash.setMenuBarVisibility(false)
+  void splash.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(splashMarkup())}`)
+  return splash
+}
+
+function splashMarkup(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+    :root { color-scheme: dark; } * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; background:#14151a; color:#eeeef2; font:14px "Segoe UI",sans-serif; border:1px solid #34323f; -webkit-app-region:drag; }
+    main { width:240px; } .brand { display:flex; align-items:center; flex-direction:column; margin-bottom:22px; }
+    .mark { color:#a8a0ff; } .track { height:3px; overflow:hidden; border-radius:9px; background:#30303c; }
+    .bar { width:42%; height:100%; border-radius:inherit; background:#a8a0ff; animation:loading 1.35s ease-in-out infinite; }
+    #status { margin:9px 0 0; color:#898b9b; font-size:10px; text-align:center; }
+    @keyframes loading { from { transform:translateX(-120%); } to { transform:translateX(340%); } }
+    @media(prefers-reduced-motion:reduce) { .bar { animation:none; width:100%; opacity:.6; } }
+  </style></head><body><main><div class="brand"><span class="mark"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span></div><div class="track" role="progressbar" aria-label="Loading"><div class="bar"></div></div><p id="status" role="status">Starting…</p></main>
+  <script>window.setSplashStatus = (message) => { document.getElementById('status').textContent = message }</script></body></html>`
+}
+
+function updateSplash(splash: BrowserWindow | null, message: string): void {
+  if (!splash || splash.isDestroyed()) return
+  void splash.webContents.executeJavaScript(`window.setSplashStatus?.(${JSON.stringify(message)})`, true).catch(() => undefined)
+}
+
+function createWindow(splash: BrowserWindow | null = null): void {
   const win = new BrowserWindow({
-    width: 1180,
-    height: 780,
+    width: 1360,
+    height: 860,
     minWidth: 920,
     minHeight: 640,
     show: false,
-    backgroundColor: '#0f1113',
+    backgroundColor: '#101114',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#00000000', symbolColor: '#9698a8', height: 32 },
     autoHideMenuBar: true,
-    title: 'Welfare Office',
-    icon: blankIcon(),
+    title: 'zodiak',
+    icon: appIcon(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -51,8 +104,45 @@ function createWindow(): void {
     console.error(preloadPath, error)
   })
 
-  win.once('ready-to-show', () => {
+  win.webContents.on('did-start-loading', () => updateSplash(splash, 'Loading the interface…'))
+  win.webContents.on('dom-ready', () => updateSplash(splash, 'Preparing screen sharing…'))
+
+  let painted = false
+  let rendererReady = false
+  const showWindow = (): void => {
+    if (win.isDestroyed() || !painted || !rendererReady) return
+    clearTimeout(startupTimeout)
+    ipcMain.removeListener(channels.rendererReady, onRendererReady)
     win.show()
+    if (splash && !splash.isDestroyed()) splash.close()
+  }
+  const onRendererReady = (event: Electron.IpcMainEvent): void => {
+    if (event.sender !== win.webContents) return
+    rendererReady = true
+    showWindow()
+  }
+  ipcMain.on(channels.rendererReady, onRendererReady)
+  const startupTimeout = setTimeout(() => {
+    // Keep a broken preload or renderer from leaving an endless splash.
+    if (win.isDestroyed()) return
+    rendererReady = true
+    painted = true
+    showWindow()
+    void dialog.showMessageBox(win, { type: 'error', title: 'Startup is taking longer than expected', message: 'zodiak could not finish starting.', detail: 'Close the app and try opening it again.' })
+  }, 20_000)
+  win.once('ready-to-show', () => { painted = true; showWindow() })
+
+  win.on('closed', () => {
+    clearTimeout(startupTimeout)
+    ipcMain.removeListener(channels.rendererReady, onRendererReady)
+    if (splash && !splash.isDestroyed()) splash.close()
+  })
+
+  win.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
+    if (!isMainFrame || code === -3) return
+    clearTimeout(startupTimeout)
+    dialog.showErrorBox('Could not open zodiak', description)
+    win.close()
   })
 
   const devUrl = process.env.ELECTRON_RENDERER_URL
@@ -75,13 +165,39 @@ function setSleepBlock(active: boolean): void {
   sleepBlocker = null
 }
 
-function parseShareRequest(value: unknown): ShareRequest {
+function parseShareRequest(value: unknown): ShareStartRequest {
   if (!isRecord(value)) throw new Error('Choose a screen or window')
   if (typeof value.sourceId !== 'string' || value.sourceId.length === 0 || value.sourceId.length > 512) {
     throw new Error('Choose a screen or window')
   }
   if (typeof value.withAudio !== 'boolean') throw new Error('Invalid audio option')
-  return { sourceId: value.sourceId, withAudio: value.withAudio }
+  if (typeof value.blockDiscordAudio !== 'boolean') throw new Error('Invalid Discord audio option')
+  if (!isRecord(value.quality)) throw new Error('Invalid share quality')
+  const resolution = value.quality.resolution
+  const frameRate = value.quality.frameRate
+  if (!isResolution(resolution) || !isFrameRate(frameRate) || !isValidQuality(resolution, frameRate)) {
+    throw new Error('This resolution and frame rate cannot be used together')
+  }
+  if (value.blockDiscordAudio && !value.withAudio) throw new Error('Discord blocking requires system audio')
+  return {
+    sourceId: value.sourceId,
+    withAudio: value.withAudio,
+    blockDiscordAudio: value.blockDiscordAudio,
+    quality: { resolution, frameRate },
+  }
+}
+
+function isResolution(value: unknown): value is ShareResolution {
+  return value === '480p' || value === '720p' || value === '1080p' || value === '4k'
+}
+
+function isFrameRate(value: unknown): value is ShareFrameRate {
+  return value === 15 || value === 24 || value === 30 || value === 60
+}
+
+function isValidQuality(resolution: ShareResolution, frameRate: ShareFrameRate): boolean {
+  if (resolution === '4k') return frameRate === 15 || frameRate === 24
+  return true
 }
 
 function registerIpc(): void {
@@ -94,7 +210,8 @@ function registerIpc(): void {
   ipcMain.handle(channels.listSources, () => settle(() => listSources()))
   ipcMain.handle(channels.prepareShare, (_event, payload: unknown) =>
     settle(async () => {
-      armCapture(parseShareRequest(payload))
+      const request = parseShareRequest(payload)
+      armCapture({ ...request, withAudio: request.withAudio && !request.blockDiscordAudio })
       return true as const
     }),
   )
@@ -117,23 +234,27 @@ function registerIpc(): void {
 
 function registerPermissions(): void {
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
-    callback(permission === 'media' || permission === 'display-capture')
+    callback(permission === 'media' || permission === 'display-capture' || permission === 'speaker-selection')
   })
   registerCaptureHandler()
 }
 
 app.whenReady().then(() => {
-  if (process.platform === 'win32') app.setAppUserModelId('sharescreen')
   registerPermissions()
   registerIpc()
-  createWindow()
+  const splash = createSplash()
+  // Let the small splash paint before loading the main renderer and its modules.
+  splash.once('ready-to-show', () => {
+    splash.show()
+    createWindow(splash)
+  })
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
 app.on('window-all-closed', () => {
-  stopSystemAudio()
   setSleepBlock(false)
+  stopSystemAudio()
   app.quit()
 })

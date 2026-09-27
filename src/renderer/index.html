@@ -1,85 +1,97 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Welfare Office</title>
-    <link rel="stylesheet" href="/src/styles.css" />
-  </head>
-  <body>
-    <div id="shell">
-      <aside>
-        <form id="create-form" class="create-form">
-          <input id="new-room" type="text" maxlength="64" placeholder="New room" spellcheck="false" autocomplete="off" />
-          <button id="create-room" class="primary" type="submit">Create</button>
-        </form>
-        <p id="list-note" class="note" role="alert" hidden></p>
-        <div id="room-list"></div>
-        <footer>
-          <label class="field" for="display-name">Display name
-            <input id="display-name" type="text" maxlength="40" autocomplete="nickname" />
-          </label>
-          <details id="server-details">
-            <summary>Server</summary>
-            <div class="server-fields">
-              <label class="field" for="server-url">LiveKit URL
-                <input id="server-url" type="text" spellcheck="false" autocomplete="off" />
-              </label>
-              <label class="field" for="api-key">API key
-                <input id="api-key" type="text" spellcheck="false" autocomplete="off" />
-              </label>
-              <label class="field" for="api-secret">API secret
-                <input id="api-secret" type="password" spellcheck="false" autocomplete="off" />
-              </label>
-            </div>
-          </details>
-        </footer>
-      </aside>
-      <section id="stage-wrap">
-        <div id="stage-head">
-          <div>
-            <h1 id="room-title">Select a room</h1>
-            <p id="session-meta"></p>
-          </div>
-          <div class="header-actions">
-            <p id="presence" class="offline"><i></i><span id="presence-label">Offline</span></p>
-            <button id="hear-audio" class="ghost" type="button" hidden>Enable audio</button>
-            <button id="share" class="primary" type="button" hidden>Share screen</button>
-            <button id="stop-live" class="danger" type="button" hidden>Stop sharing</button>
-            <button id="leave" class="ghost" type="button" hidden>Leave</button>
-          </div>
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>zodiak</title><link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div class="app-titlebar" aria-hidden="true"></div>
+  <div id="shell">
+    <nav class="workspace-rail" aria-label="Rooms">
+      <div id="room-list" aria-label="Rooms"></div>
+      <button id="create-room-action" class="rail-button rail-create" data-create-room title="Create room" aria-label="Create room"><span data-icon="plus"></span></button>
+      <button id="server-settings" class="rail-button rail-server" title="Server connection" aria-label="Server connection"><span data-icon="server"></span></button>
+    </nav>
+    <aside class="sidebar" id="room-sidebar" hidden>
+      <p id="list-note" class="note" role="alert" hidden></p>
+      <section id="members-panel" aria-label="Connected people"><div class="members-heading"><span data-icon="people" title="Connected people"></span><span id="members-count"></span></div><div id="members-list"></div></section>
+      <div class="sidebar-spacer"></div>
+      <footer class="profile-bar"><span id="profile-avatar" class="avatar">?</span><div class="profile-copy"><strong id="profile-name"></strong></div><button class="icon-button" data-settings title="Settings" aria-label="Settings"><span data-icon="settings"></span></button></footer>
+    </aside>
+    <main id="stage-wrap">
+      <header id="stage-head">
+        <span class="room-heading-icon" data-icon="monitor"></span><div class="room-heading"><h1 id="room-title">Rooms</h1></div>
+        <div class="header-actions">
+          <button id="grid-view" class="icon-button" type="button" title="Grid view" aria-label="Grid view" hidden><span data-icon="rooms"></span></button>
+          <button id="pop-out" class="icon-button" type="button" title="Pop out" aria-label="Pop out" hidden><span data-icon="popout"></span></button>
+          <button id="fullscreen" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button>
+          <button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button>
+          <button id="toggle-stats" class="icon-button" type="button" title="Stream statistics" aria-label="Stream statistics" aria-pressed="false" hidden><span data-icon="activity"></span></button>
         </div>
-        <div id="stage" class="is-idle">
-          <video id="stage-video" autoplay playsinline muted></video>
-          <div id="waiting">
-            <p id="waiting-title">Rooms</p>
-            <p id="waiting-copy">Create a room or join one from the list. Everyone sees the same rooms.</p>
-          </div>
-          <p id="stage-note" class="note" role="alert" hidden></p>
+      </header>
+      <div id="stage" class="is-idle">
+        <video id="stage-video" autoplay playsinline muted></video><div id="stream-grid" aria-label="Live screen shares" hidden></div><div id="participant-grid" aria-label="Participants" hidden></div>
+        <div id="waiting" role="status" aria-label="Select a room"><span data-icon="monitor"></span><p id="waiting-message" hidden></p></div>
+        <button id="exit-focus" class="control-button" title="Exit focus (Esc)" aria-label="Exit focus" hidden><span data-icon="focus"></span></button>
+        <p id="stage-note" class="note" role="alert" hidden></p><div id="stream-metrics" hidden><span id="tx-metrics"></span><span id="rx-metrics"></span></div>
+      </div>
+      <footer id="call-controls" hidden>
+        <div class="call-actions">
+          <button id="hear-audio" class="control-button" type="button" title="Enable audio" aria-label="Enable audio" hidden><span data-icon="volume"></span></button>
+          <button id="hide-my-screen" class="control-button" type="button" title="Hide my screen" aria-label="Hide my screen" hidden><span data-icon="eye"></span></button>
+          <button id="share" class="primary icon-action" type="button" title="Share screen" aria-label="Share screen" hidden><span data-icon="share"></span></button>
+          <button id="stop-live" class="danger icon-action" type="button" title="Stop sharing" aria-label="Stop sharing" hidden><span data-icon="stop"></span></button>
+          <button id="leave" class="leave-button" type="button" title="Leave room" aria-label="Leave room" hidden><span data-icon="leave"></span></button>
         </div>
+      </footer>
+    </main>
+  </div>
+  <dialog id="create-dialog" class="dialog small-dialog" aria-labelledby="create-title">
+    <form id="create-form" class="dialog-content">
+      <div class="panel-head"><h2 id="create-title">New room</h2><button class="icon-button" type="button" data-close="create-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
+      <div class="create-input-row"><input id="new-room" type="text" aria-label="Room name" maxlength="64" placeholder="Room name" pattern="[A-Za-z0-9_\-]+" title="Letters, numbers, dashes, underscores" spellcheck="false" autocomplete="off" required /><button id="create-room" class="primary icon-action" type="submit" title="Create room" aria-label="Create room"><span data-icon="arrow"></span></button></div>
+      <p id="create-note" class="note" role="alert" hidden></p>
+    </form>
+  </dialog>
+  <dialog id="settings-dialog" class="dialog settings-dialog" aria-label="Settings">
+    <div class="dialog-content">
+      <div class="dialog-header-actions"><button class="icon-button" data-close="settings-dialog" title="Close" aria-label="Close settings"><span data-icon="close"></span></button></div>
+      <label class="field" for="display-name">Name<input id="display-name" type="text" maxlength="40" autocomplete="nickname" title="Applies when you next join a room" /></label>
+      <section class="settings-section" id="audio-controls" aria-label="Audio">
+        <div class="audio-output-row"><label class="field" for="audio-output">Output<select id="audio-output"><option value="default">System default</option></select></label><button id="refresh-audio-output" class="control-button" type="button" title="Refresh devices" aria-label="Refresh audio devices"><span data-icon="refresh"></span></button></div>
+        <label class="field audio-volume" for="audio-volume"><span class="volume-heading"><span data-icon="volume"></span><output id="audio-volume-value" for="audio-volume">100%</output></span><input id="audio-volume" type="range" min="0" max="100" value="100" aria-label="Stream volume" /></label><p id="audio-output-note" class="quality-note" role="status" hidden></p>
       </section>
+      <p id="settings-note" class="note" role="alert" hidden></p><div class="actions"><button id="save-settings" class="primary icon-action" title="Save" aria-label="Save settings"><span data-icon="check"></span></button></div>
     </div>
-    <div id="picker" hidden>
-      <form id="picker-form" class="picker-card">
-        <div class="panel-head">
-          <h2>Share your screen</h2>
-          <button id="refresh-sources" class="ghost" type="button">Refresh</button>
-        </div>
-        <div id="sources"></div>
-        <div class="picker-foot">
-          <label class="check" for="system-audio">
-            <input id="system-audio" type="checkbox" />
-            Share system audio, except Discord
-          </label>
-          <p id="picker-note" class="note" role="alert" hidden></p>
-          <div class="actions">
-            <button id="go-live" class="primary" type="submit" disabled>Go live</button>
-            <button id="cancel-share" class="ghost" type="button">Cancel</button>
-          </div>
-        </div>
-      </form>
+  </dialog>
+  <dialog id="server-dialog" class="dialog server-dialog" aria-label="Server connection">
+    <div class="dialog-content">
+      <div class="dialog-header-actions"><button class="icon-button" data-close="server-dialog" title="Close" aria-label="Close server connection"><span data-icon="close"></span></button></div>
+      <label class="field" for="server-url">URL<input id="server-url" type="text" spellcheck="false" autocomplete="off" /></label>
+      <label class="field" for="api-key">API key<input id="api-key" type="text" spellcheck="false" autocomplete="off" /></label>
+      <label class="field" for="api-secret">API secret<input id="api-secret" type="password" spellcheck="false" autocomplete="off" /></label>
+      <p id="server-note" class="note" role="alert" hidden></p><div class="actions"><button id="save-server-settings" class="primary icon-action" title="Save server connection" aria-label="Save server connection"><span data-icon="check"></span></button></div>
     </div>
-    <audio id="remote-audio" autoplay></audio>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+  </dialog>
+  <dialog id="delete-dialog" class="dialog small-dialog" aria-labelledby="delete-title">
+    <div class="dialog-content delete-dialog-content">
+      <div class="panel-head"><h2 id="delete-title">Delete room</h2><button class="icon-button" data-close="delete-dialog" title="Close" aria-label="Close delete confirmation"><span data-icon="close"></span></button></div>
+      <p id="delete-message" class="dialog-description"></p>
+      <p id="delete-note" class="note" role="alert" hidden></p><div class="actions"><button class="ghost" type="button" data-close="delete-dialog">Cancel</button><button id="confirm-delete-room" class="danger" type="button">Delete</button></div>
+    </div>
+  </dialog>
+  <dialog id="picker" class="dialog picker-card" aria-label="Share screen">
+    <form id="picker-form" class="dialog-content">
+      <div class="dialog-header-actions"><button id="refresh-sources" class="icon-button" type="button" title="Refresh sources" aria-label="Refresh sources"><span data-icon="refresh"></span></button><button id="cancel-share" class="icon-button" type="button" title="Close" aria-label="Cancel sharing"><span data-icon="close"></span></button></div>
+      <div id="sources"></div>
+      <div class="picker-foot">
+        <div class="quality-grid"><label class="field" for="share-resolution">Resolution<select id="share-resolution"><option value="480p">480p</option><option value="720p">720p</option><option value="1080p" selected>1080p</option><option value="4k">4K</option></select></label><label class="field" for="share-framerate">FPS<select id="share-framerate"><option value="15">15</option><option value="24">24</option><option value="30">30</option><option value="60" selected>60</option></select></label></div>
+        <label class="check" for="system-audio"><span>System audio</span><input id="system-audio" type="checkbox" role="switch" checked /></label>
+        <label class="check" for="block-discord-audio"><span>Exclude Discord</span><input id="block-discord-audio" type="checkbox" role="switch" checked /></label>
+        <p id="picker-note" class="note" role="alert" hidden></p><div class="actions"><button id="go-live" class="primary icon-action" type="submit" title="Start sharing" aria-label="Start sharing" disabled><span data-icon="share"></span></button></div>
+      </div>
+    </form>
+  </dialog>
+  <div id="remote-audio-rack" hidden></div><script type="module" src="/src/main.ts"></script>
+</body>
 </html>

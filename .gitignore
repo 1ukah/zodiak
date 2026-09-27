@@ -1,15 +1,31 @@
+# JavaScript / Electron build output and packaged releases
 node_modules/
 out/
 dist/
 release/
 
-native/bin/
+# .NET build and publish output (keep the native project sources)
+**/[Bb]in/
+**/[Oo]bj/
+native/**/publish/
+
+# Legacy native helper output retained locally from prior versions
+native/discord-audio-guard/
+
+# Windows binaries, installers, and electron-builder metadata
 *.exe
+*.msi
+*.msix
+*.appx
 *.dll
 *.pdb
 *.obj
 *.ilk
 *.blockmap
+*.nupkg
+*.snupkg
+*.asar
+*.asar.unpacked
 
 .env
 .env.*
