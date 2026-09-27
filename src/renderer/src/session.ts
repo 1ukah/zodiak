@@ -132,13 +132,13 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
   const dimensions = dimensionsFor(quality)
   let protectedAudio: MediaStreamTrack | null = null
   try {
-    if (withAudio && excludeDiscord) protectedAudio = await openSystemAudioTrack()
+    if (withAudio) protectedAudio = await openSystemAudioTrack(excludeDiscord)
     const publication = await current.localParticipant.setScreenShareEnabled(
       true,
       {
-        // Chromium loopback is an already-mixed stream. When Discord exclusion
-        // is selected, publish the WASAPI process-loopback track instead.
-        audio: withAudio && !excludeDiscord,
+        // Chromium loopback is already mixed. Publish the protected WASAPI
+        // process-loopback track instead so this app's audio cannot feed back.
+        audio: false,
         contentHint: 'detail',
         resolution: { width: dimensions.width, height: dimensions.height, frameRate: quality.frameRate },
       },

@@ -11,4 +11,5 @@ contextBridge.exposeInMainWorld('sharescreen', {
   createToken: ({ room }) => ok({ url: config.url, token: 'ui-test', identity: 'me', room, role: 'viewer' }),
   listSources: () => ok([{ id: 'screen:1', name: 'Entire screen', thumbnail: '' }, { id: 'window:1', name: 'Browser window', thumbnail: '' }]),
   prepareShare: () => ok(true), setSharing: () => ok(true), startSystemAudio: () => ok(true), stopSystemAudio: () => ok(true), onSystemAudio: () => () => {},
+  setWindowFullscreen: active => ok(Boolean(active)), onWindowFullscreenChanged: () => () => {},
 })

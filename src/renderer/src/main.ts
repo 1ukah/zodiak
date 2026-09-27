@@ -28,6 +28,9 @@ const leaveButton = byId('leave', HTMLButtonElement)
 const stage = elementById('stage')
 const video = byId('stage-video', HTMLVideoElement)
 const streamGrid = elementById('stream-grid')
+const focusedStreamVolume = byId('focused-stream-volume', HTMLLabelElement)
+const focusedStreamVolumeInput = byId('focused-stream-volume-input', HTMLInputElement)
+const focusedStreamVolumeValue = byId('focused-stream-volume-value', HTMLOutputElement)
 const audioRack = elementById('remote-audio-rack')
 const waiting = elementById('waiting')
 const waitingMessage = byId('waiting-message', HTMLParagraphElement)
@@ -87,6 +90,7 @@ let telemetry: StreamTelemetry = {}
 let lastGridSignature = ''
 let roomsFingerprint = ''
 let selectedAudioOutput = 'default'
+let windowFullscreen = false
 const streamVolumes = new Map<string, number>()
 let roomPendingDeletion: string | null = null
 
@@ -174,7 +178,7 @@ function bind(): void {
     const name = roomPendingDeletion
     if (name) void onDelete(name)
   })
-  elementById('exit-focus').addEventListener('click', () => setTheater(false))
+  elementById('exit-focus').addEventListener('click', () => void exitFocusView())
   statisticsButton.addEventListener('click', () => {
     showStatistics = !showStatistics
     statisticsButton.setAttribute('aria-pressed', String(showStatistics))
@@ -199,6 +203,7 @@ function bind(): void {
   video.addEventListener('click', () => {
     if (streams.length && participants.length > 1) { gridView = true; renderChrome() }
   })
+  focusedStreamVolumeInput.addEventListener('input', syncFocusedStreamVolume)
   stopButton.addEventListener('click', () => void onStop())
   leaveButton.addEventListener('click', () => void onLeave())
   hearButton.addEventListener('click', () => {
@@ -207,7 +212,6 @@ function bind(): void {
   })
   refreshButton.addEventListener('click', () => void loadSources())
   audioInput.addEventListener('change', syncSystemAudioControls)
-  blockDiscordInput.addEventListener('change', syncSystemAudioControls)
   audioVolumeInput.addEventListener('input', syncAudioVolume)
   audioOutputInput.addEventListener('change', () => void onAudioOutputChanged())
   refreshAudioOutputButton.addEventListener('click', () => void loadAudioOutputs())
@@ -216,10 +220,14 @@ function bind(): void {
   cancelShareButton.addEventListener('click', closePicker)
   resolutionInput.addEventListener('change', syncQualityControls)
   frameRateInput.addEventListener('change', syncQualityControls)
-  document.addEventListener('fullscreenchange', syncFullscreenLabel)
+  window.sharescreen.onWindowFullscreenChanged((active) => {
+    windowFullscreen = active
+    if (!active) setTheater(false)
+    syncFullscreenLabel()
+  })
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && document.body.classList.contains('theater')) {
-      setTheater(false)
+      void exitFocusView()
     }
   })
   window.addEventListener('beforeunload', () => { void window.sharescreen.setSharing(false); void leaveRoom() })
@@ -357,15 +365,24 @@ async function connect(roomName: string, role: Role): Promise<boolean> {
 
 async function toggleFullscreen(): Promise<void> {
   try {
-    if (document.fullscreenElement) await document.exitFullscreen()
-    else await (streamGrid.hidden ? video : streamGrid).requestFullscreen({ navigationUI: 'hide' })
+    const next = !windowFullscreen
+    const result = await window.sharescreen.setWindowFullscreen(next)
+    if (!result.ok) throw new Error(result.error)
+    windowFullscreen = result.value
+    setTheater(windowFullscreen)
+    syncFullscreenLabel()
   } catch (error) {
     showNote(stageNote, `Fullscreen is unavailable: ${messageOf(error)}`, 'warn')
   }
 }
 
 function syncFullscreenLabel(): void {
-  labelButton(fullscreenButton, document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen')
+  labelButton(fullscreenButton, windowFullscreen ? 'Exit fullscreen' : 'Fullscreen')
+}
+
+async function exitFocusView(): Promise<void> {
+  if (windowFullscreen) await toggleFullscreen()
+  else setTheater(false)
 }
 
 async function popOutVideo(): Promise<void> {
@@ -381,7 +398,7 @@ async function popOutVideo(): Promise<void> {
 
 async function openPicker(): Promise<void> {
   if (!currentRoom) return
-  picker.showModal(); clearNote(pickerNote); syncQualityControls(); await loadSources()
+  picker.showModal(); clearNote(pickerNote); syncSystemAudioControls(); syncQualityControls(); await loadSources()
 }
 
 function closePicker(): void { picker.close(); sourcesRequest++; selectedSourceId = null; clearNote(pickerNote); updatePickerControls() }
@@ -443,7 +460,7 @@ async function onGoLive(): Promise<void> {
       quality,
     })
     if (!armed.ok) return showNote(pickerNote, armed.error, 'error')
-    audioGuardArmed = audioInput.checked && blockDiscordInput.checked
+    audioGuardArmed = audioInput.checked
     await publishScreen(audioInput.checked, audioInput.checked && blockDiscordInput.checked, quality)
     const active = await window.sharescreen.setSharing(true)
     if (!active.ok) showNote(stageNote, active.error, 'warn')
@@ -504,6 +521,7 @@ function renderChrome(): void {
   video.hidden = useGrid || !selectedStreamId
   streamGrid.hidden = !useGrid
   setStageVideoVisible(!useGrid && Boolean(selectedStreamId))
+  renderFocusedStreamVolume(useGrid)
   renderGrid(useGrid)
   elementById('call-controls').hidden = !inRoom
   statisticsButton.hidden = !streams.length
@@ -522,6 +540,29 @@ function renderChrome(): void {
   waitingMessage.hidden = true
   waiting.hidden = selectedStreamId !== null || participants.length > 0
   if (selectedStreamId === null) waiting.setAttribute('aria-label', hideLocalPreview && localStream ? 'Local preview hidden' : 'No screens')
+}
+
+function renderFocusedStreamVolume(useGrid: boolean): void {
+  const stream = streams.find((candidate) => candidate.id === selectedStreamId)
+  const visible = !useGrid && stream !== undefined && !stream.local
+  focusedStreamVolume.hidden = !visible
+  if (!stream) return
+  const value = Math.round((streamVolumes.get(stream.id) ?? 1) * 100)
+  focusedStreamVolumeInput.value = String(value)
+  focusedStreamVolumeInput.setAttribute('aria-label', `Volume for ${stream.participantName}`)
+  focusedStreamVolumeInput.title = `Volume for ${stream.participantName}`
+  focusedStreamVolumeValue.value = `${value}%`
+  focusedStreamVolumeValue.textContent = `${value}%`
+}
+
+function syncFocusedStreamVolume(): void {
+  const stream = streams.find((candidate) => candidate.id === selectedStreamId)
+  if (!stream || stream.local) return
+  const value = Math.max(0, Math.min(100, Number(focusedStreamVolumeInput.value) || 0)) / 100
+  streamVolumes.set(stream.id, value)
+  focusedStreamVolumeValue.value = `${Math.round(value * 100)}%`
+  focusedStreamVolumeValue.textContent = focusedStreamVolumeValue.value
+  setStreamVolume(stream.id, value)
 }
 
 function renderGrid(active: boolean): void {

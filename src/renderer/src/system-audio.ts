@@ -9,7 +9,7 @@ let node: AudioWorkletNode | null = null
 let track: MediaStreamTrack | null = null
 let unsubscribe: (() => void) | null = null
 
-export async function openSystemAudioTrack(): Promise<MediaStreamTrack> {
+export async function openSystemAudioTrack(excludeDiscord: boolean): Promise<MediaStreamTrack> {
   await closeSystemAudio()
   context = new AudioContext({ sampleRate: 48000 })
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
@@ -19,7 +19,7 @@ export async function openSystemAudioTrack(): Promise<MediaStreamTrack> {
   unsubscribe = window.sharescreen.onSystemAudio((pcm) => {
     const copy = new Uint8Array(pcm.byteLength); copy.set(pcm); node?.port.postMessage(copy.buffer, [copy.buffer])
   })
-  const started = await window.sharescreen.startSystemAudio()
+  const started = await window.sharescreen.startSystemAudio(excludeDiscord)
   if (!started.ok) { await closeSystemAudio(); throw new Error(started.error) }
   track = destination.stream.getAudioTracks()[0] ?? null
   if (!track) { await closeSystemAudio(); throw new Error('System audio did not start') }
