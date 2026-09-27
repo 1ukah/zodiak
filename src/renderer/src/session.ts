@@ -143,8 +143,9 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
         resolution: { width: dimensions.width, height: dimensions.height, frameRate: quality.frameRate },
       },
       {
-        simulcast: true,
-        degradationPreference: 'balanced',
+        videoCodec: 'h264',
+        simulcast: false,
+        degradationPreference: 'maintain-resolution',
         screenShareEncoding: {
           maxBitrate: shareBitrateFor(quality),
           maxFramerate: quality.frameRate,
