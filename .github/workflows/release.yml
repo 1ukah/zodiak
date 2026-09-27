@@ -55,5 +55,5 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:GITHUB_REF_NAME $asset --clobber
           } else {
-            gh release create $env:GITHUB_REF_NAME $asset --title "Zodiak $env:GITHUB_REF_NAME" --generate-notes
+            gh release create $env:GITHUB_REF_NAME $asset --title $env:GITHUB_REF_NAME --notes ""
           }
