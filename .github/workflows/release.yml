@@ -1,0 +1,59 @@
+name: Build and release Windows installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build zodiak-setup.exe
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Confirm tag matches VERSION
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "The pushed tag ($env:GITHUB_REF_NAME) must match VERSION (v$version)."
+          }
+
+      - name: Apply version to package metadata
+        run: npm run version:sync
+
+      - name: Build installer
+        run: npm run pack
+
+      - name: Create GitHub release and upload installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $asset = "dist/zodiak-setup.exe#zodiak-setup.exe"
+          gh release view $env:GITHUB_REF_NAME 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME $asset --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME $asset --title "Zodiak $env:GITHUB_REF_NAME" --generate-notes
+          }
