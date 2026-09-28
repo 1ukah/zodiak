@@ -1,5 +1,5 @@
 import {
-  Activity, ArrowRight, Check, Eye, EyeOff, Headphones, LayoutGrid,
+  ArrowRight, Check, Eye, EyeOff, Headphones, LayoutGrid,
   LoaderCircle, LogOut, Maximize, Monitor, MonitorUp, PanelLeftClose,
   PictureInPicture2, Plus, RotateCw, Search, Server, Settings, Square, Users,
   Volume2, VolumeX, X, createElement, type IconNode,
@@ -12,7 +12,7 @@ const icons: Record<string, IconNode> = {
   expand: Maximize, popout: PictureInPicture2, focus: PanelLeftClose,
   eye: Eye, 'eye-off': EyeOff, stop: Square, leave: LogOut, close: X,
   refresh: RotateCw, arrow: ArrowRight, check: Check, volume: Volume2,
-  'volume-off': VolumeX, activity: Activity, loader: LoaderCircle,
+  'volume-off': VolumeX, loader: LoaderCircle,
 }
 
 export function icon(name: string): string {

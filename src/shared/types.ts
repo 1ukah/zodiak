@@ -5,6 +5,7 @@ export interface AppConfig {
   apiKey: string
   apiSecret: string
   displayName: string
+  showStreamStatistics: boolean
 }
 
 export interface RoomSummary {

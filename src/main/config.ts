@@ -5,10 +5,13 @@ import type { AppConfig } from '../shared/types'
 import { isRecord } from './parse'
 
 const DEFAULT_CONFIG: AppConfig = {
-  url: 'ws://192.168.15.2:7880',
-  apiKey: 'devkey',
-  apiSecret: 'secret',
+  // An absent or malformed saved file must never look like a usable server
+  // configuration. The renderer uses its field placeholder for the example.
+  url: '',
+  apiKey: '',
+  apiSecret: '',
   displayName: '',
+  showStreamStatistics: false,
 }
 
 export interface ResolvedServer {
@@ -82,23 +85,27 @@ export function validateConfig(value: unknown): AppConfig {
     apiKey: requireCredential(value.apiKey, 'API key'),
     apiSecret: requireCredential(value.apiSecret, 'API secret'),
     displayName: optionalDisplayName(value.displayName),
+    showStreamStatistics: value.showStreamStatistics === true,
   }
 }
 
 function normalizeStored(value: unknown): AppConfig {
   const record = isRecord(value) ? value : {}
-  const url = stringOr(record.url, DEFAULT_CONFIG.url).trim() || DEFAULT_CONFIG.url
-  let signalUrl = DEFAULT_CONFIG.url
-  try {
-    signalUrl = resolveServer(url).signalUrl
-  } catch {
-    signalUrl = DEFAULT_CONFIG.url
+  const storedUrl = stringOr(record.url, '').trim()
+  let url = ''
+  if (storedUrl) {
+    try {
+      url = resolveServer(storedUrl).signalUrl
+    } catch {
+      // Do not replace an invalid saved URL with a working-looking default.
+    }
   }
   return {
-    url: signalUrl,
-    apiKey: stringOr(record.apiKey, '').trim() || DEFAULT_CONFIG.apiKey,
-    apiSecret: stringOr(record.apiSecret, '').trim() || DEFAULT_CONFIG.apiSecret,
+    url,
+    apiKey: stringOr(record.apiKey, '').trim(),
+    apiSecret: stringOr(record.apiSecret, '').trim(),
     displayName: stringOr(record.displayName, '').trim(),
+    showStreamStatistics: record.showStreamStatistics === true,
   }
 }
 

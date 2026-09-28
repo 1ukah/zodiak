@@ -4,6 +4,7 @@ let streams = []
 export const state = window.uiTest = {
   hooks: null, volume: 1, streamVolume: 1, device: 'default', selected: null, targets: [],
   emitStreams(value) { streams = value; hooks.onStreams(value) },
+  emitTelemetry(value) { hooks.onTelemetry(value) },
 }
 export async function joinRoom(options) {
   hooks = options.hooks; state.hooks = hooks

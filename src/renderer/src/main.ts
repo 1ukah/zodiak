@@ -26,18 +26,20 @@ const hideMyScreenButton = byId('hide-my-screen', HTMLButtonElement)
 const stopButton = byId('stop-live', HTMLButtonElement)
 const leaveButton = byId('leave', HTMLButtonElement)
 const stage = elementById('stage')
+const stageWrap = elementById('stage-wrap')
 const video = byId('stage-video', HTMLVideoElement)
 const streamGrid = elementById('stream-grid')
-const focusedStreamVolume = byId('focused-stream-volume', HTMLLabelElement)
+const focusedStreamVolume = byId('focused-stream-volume', HTMLDivElement)
 const focusedStreamVolumeInput = byId('focused-stream-volume-input', HTMLInputElement)
 const focusedStreamVolumeValue = byId('focused-stream-volume-value', HTMLOutputElement)
+const focusedStreamMuteButton = byId('focused-stream-mute', HTMLButtonElement)
 const audioRack = elementById('remote-audio-rack')
 const waiting = elementById('waiting')
 const waitingMessage = byId('waiting-message', HTMLParagraphElement)
 const stageNote = byId('stage-note', HTMLParagraphElement)
 const streamMetrics = elementById('stream-metrics')
-const txMetrics = byId('tx-metrics', HTMLSpanElement)
-const rxMetrics = byId('rx-metrics', HTMLSpanElement)
+const hostMetrics = byId('host-metrics', HTMLElement)
+const viewerMetrics = byId('viewer-metrics', HTMLElement)
 const membersPanel = elementById('members-panel')
 const membersCount = byId('members-count', HTMLSpanElement)
 const membersList = elementById('members-list')
@@ -57,6 +59,7 @@ const refreshAudioOutputButton = byId('refresh-audio-output', HTMLButtonElement)
 const audioVolumeInput = byId('audio-volume', HTMLInputElement)
 const audioVolumeValue = byId('audio-volume-value', HTMLOutputElement)
 const audioOutputNote = byId('audio-output-note', HTMLParagraphElement)
+const showStreamStatisticsInput = byId('show-stream-statistics', HTMLInputElement)
 const settingsDialog = byId('settings-dialog', HTMLDialogElement)
 const serverDialog = byId('server-dialog', HTMLDialogElement)
 const deleteDialog = byId('delete-dialog', HTMLDialogElement)
@@ -73,7 +76,6 @@ let joining = false
 let publishing = false
 let sourcesRequest = 0
 let showStatistics = false
-const statisticsButton = byId('toggle-stats', HTMLButtonElement)
 
 let rooms: RoomSummary[] = []
 let currentRoom: string | null = null
@@ -91,6 +93,9 @@ let lastGridSignature = ''
 let roomsFingerprint = ''
 let selectedAudioOutput = 'default'
 let windowFullscreen = false
+let screenControlsVisible = false
+let screenControlsTimer: number | null = null
+let streamMetricsHovered = false
 const streamVolumes = new Map<string, number>()
 let roomPendingDeletion: string | null = null
 
@@ -179,11 +184,6 @@ function bind(): void {
     if (name) void onDelete(name)
   })
   elementById('exit-focus').addEventListener('click', () => void exitFocusView())
-  statisticsButton.addEventListener('click', () => {
-    showStatistics = !showStatistics
-    statisticsButton.setAttribute('aria-pressed', String(showStatistics))
-    renderTelemetry()
-  })
   picker.addEventListener('cancel', (event) => { event.preventDefault(); if (!publishing) closePicker() })
   shareButton.addEventListener('click', () => void openPicker())
   fullscreenButton.addEventListener('click', () => void toggleFullscreen())
@@ -200,10 +200,27 @@ function bind(): void {
     selectBestStream()
     renderChrome()
   })
+  stageWrap.addEventListener('pointermove', revealScreenControls)
+  stageWrap.addEventListener('pointerdown', revealScreenControls)
+  stageWrap.addEventListener('focusin', revealScreenControls)
+  streamMetrics.addEventListener('pointerenter', () => {
+    streamMetricsHovered = true
+    revealScreenControls()
+  })
+  streamMetrics.addEventListener('pointerleave', () => {
+    streamMetricsHovered = false
+    revealScreenControls()
+  })
   video.addEventListener('click', () => {
     if (streams.length && participants.length > 1) { gridView = true; renderChrome() }
   })
   focusedStreamVolumeInput.addEventListener('input', syncFocusedStreamVolume)
+  focusedStreamMuteButton.addEventListener('click', () => {
+    const stream = streams.find((candidate) => candidate.id === selectedStreamId)
+    if (!stream || stream.local) return
+    setStreamMuted(stream.id, !stream.muted)
+    revealScreenControls()
+  })
   stopButton.addEventListener('click', () => void onStop())
   leaveButton.addEventListener('click', () => void onLeave())
   hearButton.addEventListener('click', () => {
@@ -213,6 +230,10 @@ function bind(): void {
   refreshButton.addEventListener('click', () => void loadSources())
   audioInput.addEventListener('change', syncSystemAudioControls)
   audioVolumeInput.addEventListener('input', syncAudioVolume)
+  showStreamStatisticsInput.addEventListener('change', () => {
+    showStatistics = showStreamStatisticsInput.checked
+    renderTelemetry()
+  })
   audioOutputInput.addEventListener('change', () => void onAudioOutputChanged())
   refreshAudioOutputButton.addEventListener('click', () => void loadAudioOutputs())
   navigator.mediaDevices?.addEventListener?.('devicechange', () => void loadAudioOutputs())
@@ -226,6 +247,7 @@ function bind(): void {
     syncFullscreenLabel()
   })
   document.addEventListener('keydown', (event) => {
+    if (stageWrap.contains(document.activeElement)) revealScreenControls()
     if (event.key === 'Escape' && document.body.classList.contains('theater')) {
       void exitFocusView()
     }
@@ -509,6 +531,7 @@ function renderChrome(): void {
   hideMyScreenButton.setAttribute('aria-pressed', String(hideLocalPreview))
   stopButton.hidden = !localStream; leaveButton.hidden = !inRoom
   const hasVideo = visibleStreams.length > 0
+  syncScreenControlsVisibility(hasVideo)
   fullscreenButton.hidden = !hasVideo
   popOutButton.hidden = !hasVideo || gridView
   const canUseGrid = streams.length > 0 && participants.length > 1
@@ -524,8 +547,6 @@ function renderChrome(): void {
   renderFocusedStreamVolume(useGrid)
   renderGrid(useGrid)
   elementById('call-controls').hidden = !inRoom
-  statisticsButton.hidden = !streams.length
-  if (!streams.length) { showStatistics = false; statisticsButton.setAttribute('aria-pressed', 'false') }
   renderTelemetry()
   renderParticipantTiles(inRoom && !useGrid && !selectedStreamId && participants.length > 0)
   if (!inRoom) {
@@ -550,9 +571,12 @@ function renderFocusedStreamVolume(useGrid: boolean): void {
   const value = Math.round((streamVolumes.get(stream.id) ?? 1) * 100)
   focusedStreamVolumeInput.value = String(value)
   focusedStreamVolumeInput.setAttribute('aria-label', `Volume for ${stream.participantName}`)
-  focusedStreamVolumeInput.title = `Volume for ${stream.participantName}`
+  focusedStreamVolumeInput.title = `Volume for ${stream.participantName}: ${value}%`
   focusedStreamVolumeValue.value = `${value}%`
   focusedStreamVolumeValue.textContent = `${value}%`
+  focusedStreamMuteButton.innerHTML = icon(stream.muted ? 'volume-off' : 'volume')
+  labelButton(focusedStreamMuteButton, `${stream.muted ? 'Unmute' : 'Mute'} ${stream.participantName}`)
+  focusedStreamMuteButton.setAttribute('aria-pressed', String(stream.muted))
 }
 
 function syncFocusedStreamVolume(): void {
@@ -562,6 +586,7 @@ function syncFocusedStreamVolume(): void {
   streamVolumes.set(stream.id, value)
   focusedStreamVolumeValue.value = `${Math.round(value * 100)}%`
   focusedStreamVolumeValue.textContent = focusedStreamVolumeValue.value
+  focusedStreamVolumeInput.title = `Volume for ${stream.participantName}: ${focusedStreamVolumeValue.value}`
   setStreamVolume(stream.id, value)
 }
 
@@ -595,24 +620,27 @@ function renderGrid(active: boolean): void {
       tile.append(tileVideo)
       targets.set(stream.id, tileVideo)
       if (!stream.local) {
+        const audioControls = Object.assign(document.createElement('div'), { className: 'grid-stream-audio-controls' })
         const mute = Object.assign(document.createElement('button'), { type: 'button', className: 'grid-tile-mute' })
         mute.innerHTML = icon(stream.muted ? 'volume-off' : 'volume')
         labelButton(mute, `${stream.muted ? 'Unmute' : 'Mute'} ${stream.participantName}`)
         mute.setAttribute('aria-pressed', String(stream.muted))
         mute.addEventListener('click', (event) => { event.stopPropagation(); setStreamMuted(stream.id, !stream.muted) })
-        tile.append(mute)
         const volume = Object.assign(document.createElement('input'), { type: 'range', className: 'grid-tile-volume', min: '0', max: '100', value: String(Math.round((streamVolumes.get(stream.id) ?? 1) * 100)) })
         volume.setAttribute('aria-label', `Volume for ${stream.participantName}`)
-        volume.title = `Volume for ${stream.participantName}`
+        volume.title = `Volume for ${stream.participantName}: ${volume.value}%`
         const updateVolume = (event: Event) => {
           event.stopPropagation()
           const value = Math.max(0, Math.min(100, Number((event.currentTarget as HTMLInputElement).value) || 0)) / 100
           streamVolumes.set(stream.id, value)
+          const input = event.currentTarget as HTMLInputElement
+          input.title = `Volume for ${stream.participantName}: ${Math.round(value * 100)}%`
           setStreamVolume(stream.id, value)
         }
         volume.addEventListener('input', updateVolume)
         volume.addEventListener('click', (event) => event.stopPropagation())
-        tile.append(volume)
+        audioControls.append(volume, mute)
+        tile.append(audioControls)
       }
     } else {
       tile.classList.add('is-participant')
@@ -670,6 +698,7 @@ function syncAudioVolume(): void {
   audioVolumeInput.value = String(value)
   audioVolumeValue.value = `${value}%`
   audioVolumeValue.textContent = `${value}%`
+  audioVolumeInput.title = `Incoming screen-audio volume: ${value}%`
   setRemoteAudioVolume(value / 100)
 }
 
@@ -722,23 +751,57 @@ function isQualityAllowed(resolution: ShareResolution, frameRate: ShareFrameRate
 
 function renderTelemetry(): void {
   const hasMetrics = Boolean(telemetry.sent || telemetry.received)
-  streamMetrics.hidden = !hasMetrics || !showStatistics
-  txMetrics.hidden = !telemetry.sent
-  rxMetrics.hidden = !telemetry.received
-  if (telemetry.sent) txMetrics.textContent = `TX ${formatMetric(telemetry.sent)}`
-  if (telemetry.received) rxMetrics.textContent = `RX ${formatMetric(telemetry.received)}`
+  const focusView = currentRoom !== null && !gridView && selectedStreamId !== null
+  streamMetrics.hidden = !hasMetrics || !showStatistics || !focusView
+  if (streamMetrics.hidden) streamMetricsHovered = false
+  renderMetricCard(hostMetrics, telemetry.sent, 'host')
+  renderMetricCard(viewerMetrics, telemetry.received, 'viewer')
 }
 
-function formatMetric(metric: StreamMetric): string {
-  const quality = metric.width && metric.height ? `${metric.width}×${metric.height}` : '—'
-  const fps = metric.frameRate ? `${Math.round(metric.frameRate)} fps` : '— fps'
-  const loss = metric.packetsLost ? ` · loss ${metric.packetsLost}` : ''
-  const target = metric.targetBitrate ? ` · target ${formatBitrate(metric.targetBitrate)}` : ''
-  return `${formatBitrate(metric.bitrate)}${target} · ${fps} · ${quality} · ${Math.round(metric.packetRate)} pkt/s${loss}`
+function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, side: 'host' | 'viewer'): void {
+  card.hidden = !metric
+  if (!metric) return
+  const quality = metric.width && metric.height ? `${metric.width} × ${metric.height}` : '—'
+  const baseRows: Array<[string, string]> = [
+    ['Video', quality],
+    ['Bitrate', formatBitrate(metric.bitrate)],
+    ['Frame rate', metric.frameRate ? `${Math.round(metric.frameRate)} fps` : '—'],
+    ['Packet rate', metric.packetRate ? `${Math.round(metric.packetRate)} /s` : '—'],
+    ['Jitter', formatMilliseconds(metric.jitterMs)],
+    ['Packet loss', formatPacketLoss(metric)],
+    ['Packets', formatCount(metric.packets)],
+    ['Frames', formatCount(metric.frames)],
+    ['Data', formatBytes(metric.bytes)],
+  ]
+  const networkRows: Array<[string, string]> = side === 'host'
+    ? [['Target', formatBitrate(metric.targetBitrate)], ['RTT', formatMilliseconds(metric.roundTripTimeMs)]]
+    : [['Buffer', formatMilliseconds(metric.jitterBufferDelayMs)], ['Decode', formatMilliseconds(metric.decodeTimeMs)]]
+  const rows = [...baseRows.slice(0, 3), ...networkRows, ...baseRows.slice(3)]
+  const list = card.querySelector('dl')!
+  list.replaceChildren(...rows.map(([label, value]) => {
+    const row = document.createElement('div')
+    const term = Object.assign(document.createElement('dt'), { textContent: label })
+    const detail = Object.assign(document.createElement('dd'), { textContent: value })
+    row.append(term, detail)
+    return row
+  }))
+}
+
+function formatMilliseconds(value: number | undefined): string { return value === undefined ? '—' : `${Math.round(value)} ms` }
+function formatPacketLoss(metric: StreamMetric): string {
+  if (metric.packetLossPercent === undefined) return metric.packetsLost === undefined ? '—' : `${formatCount(metric.packetsLost)} lost`
+  return `${metric.packetLossPercent.toFixed(metric.packetLossPercent < 1 ? 2 : 1)}% · ${formatCount(metric.packetsLost ?? 0)} lost`
+}
+function formatCount(value: number): string { return new Intl.NumberFormat().format(Math.round(value)) }
+function formatBytes(value: number): string {
+  if (value < 1_000) return `${Math.round(value)} B`
+  if (value < 1_000_000) return `${(value / 1_000).toFixed(1)} KB`
+  return `${(value / 1_000_000).toFixed(2)} MB`
 }
 
 
-function formatBitrate(bits: number): string {
+function formatBitrate(bits: number | undefined): string {
+  if (!bits) return '—'
   if (bits >= 1_000_000) return `${(bits / 1_000_000).toFixed(1)} Mb/s`
   return `${Math.round(bits / 1_000)} Kb/s`
 }
@@ -752,17 +815,54 @@ async function persistConfig(): Promise<AppConfig | null> {
     fillForm(saved.value); return saved.value
   } catch (error) { openServerSettings(); showNote(serverNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value } }
+function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
   urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
+  showStatistics = config.showStreamStatistics
+  showStreamStatisticsInput.checked = showStatistics
   elementById('profile-name').textContent = config.displayName || 'Name'
   elementById('profile-avatar').textContent = initials(config.displayName)
   elementById('profile-avatar').style.setProperty('--avatar-hue', String(avatarHue(config.displayName)))
 }
 function openSettings(): void { clearNote(settingsNote); if (!settingsDialog.open) settingsDialog.showModal() }
 function openServerSettings(): void { clearNote(serverNote); if (!serverDialog.open) serverDialog.showModal() }
-function setTheater(active: boolean): void { document.body.classList.toggle('theater', active); labelButton(theaterButton, active ? 'Exit focus' : 'Focus view'); elementById('exit-focus').hidden = !active }
+function syncScreenControlsVisibility(hasVideo: boolean): void {
+  if (!hasVideo) {
+    screenControlsVisible = false
+    if (screenControlsTimer !== null) window.clearTimeout(screenControlsTimer)
+    screenControlsTimer = null
+    stageWrap.classList.remove('screen-controls-idle')
+    return
+  }
+  if (!screenControlsVisible) {
+    screenControlsVisible = true
+    revealScreenControls()
+  }
+}
+
+function revealScreenControls(): void {
+  stageWrap.classList.remove('screen-controls-idle')
+  if (screenControlsTimer !== null) window.clearTimeout(screenControlsTimer)
+  if (!screenControlsVisible) return
+  screenControlsTimer = window.setTimeout(hideScreenControls, 1_500)
+}
+
+function hideScreenControls(): void {
+  screenControlsTimer = null
+  if (streamMetricsHovered && !streamMetrics.hidden) {
+    revealScreenControls()
+    return
+  }
+  stageWrap.classList.add('screen-controls-idle')
+}
+
+function setTheater(active: boolean): void {
+  document.body.classList.toggle('theater', active)
+  labelButton(theaterButton, active ? 'Exit focus' : 'Focus view')
+  elementById('exit-focus').hidden = !active
+  if (active) revealScreenControls()
+}
 function initials(name: string): string { return name.trim().split(/\s+/).slice(0, 2).map((part) => [...part][0] ?? '').join('').toUpperCase() || '?' }
 function avatarHue(name: string): number { return [...name].reduce((hash, character) => (hash * 31 + character.charCodeAt(0)) % 360, 252) }
 function makeAvatar(name: string): HTMLSpanElement { const avatar = Object.assign(document.createElement('span'), { className: 'avatar', textContent: initials(name) }); avatar.style.setProperty('--avatar-hue', String(avatarHue(name))); avatar.setAttribute('aria-hidden', 'true'); return avatar }

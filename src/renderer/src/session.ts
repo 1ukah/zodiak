@@ -34,14 +34,21 @@ export interface ScreenStream {
 }
 
 export interface StreamMetric {
+  bytes: number
   bitrate: number
   packetRate: number
   packets: number
+  frames: number
   packetsLost?: number
   frameRate?: number
   width?: number
   height?: number
   targetBitrate?: number
+  packetLossPercent?: number
+  roundTripTimeMs?: number
+  jitterMs?: number
+  jitterBufferDelayMs?: number
+  decodeTimeMs?: number
 }
 
 export interface StreamTelemetry {
@@ -84,10 +91,12 @@ let gridTracks = new Map<string, LocalVideoTrack | RemoteVideoTrack>()
 let statsTimer: ReturnType<typeof window.setInterval> | null = null
 let lastStats = new Map<string, CounterSample>()
 let telemetryInFlight = false
+let localScreenTargetBitrate: number | undefined
 
 interface CounterSample {
   bytes: number
   packets: number
+  packetsLost: number
   frames: number
   timestamp: number
 }
@@ -157,6 +166,7 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
     if (!track || track.kind !== Track.Kind.Video) {
       throw new Error('Screen share did not start. Choose a screen and try again.')
     }
+    localScreenTargetBitrate = shareBitrateFor(quality)
     if (protectedAudio) {
       await current.localParticipant.publishTrack(protectedAudio, {
         source: Track.Source.ScreenShareAudio,
@@ -166,6 +176,7 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
     }
     refreshStreams(current)
   } catch (error) {
+    localScreenTargetBitrate = undefined
     await current.localParticipant.setScreenShareEnabled(false).catch(() => undefined)
     await closeSystemAudio()
     throw new Error(captureMessage(error))
@@ -175,6 +186,7 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
 export async function unpublishScreen(): Promise<void> {
   const current = requireRoom()
   await current.localParticipant.setScreenShareEnabled(false)
+  localScreenTargetBitrate = undefined
   await closeSystemAudio()
   refreshStreams(current)
 }
@@ -482,6 +494,7 @@ function clearMedia(): void {
   remoteAudio.clear()
   remoteAudioTracks.clear()
   remoteStreamVolumes.clear()
+  localScreenTargetBitrate = undefined
   if (targets) targets.video.srcObject = null
   hooks?.onStreams([])
   hooks?.onParticipants([])
@@ -515,11 +528,21 @@ async function collectTelemetry(current: Room): Promise<void> {
   if (localTrack?.kind === Track.Kind.Video) {
     const senderStats = await localTrack.getSenderStats().catch(() => [])
     const primary = senderStats.reduce((largest, stat) => (stat.bytesSent ?? 0) > (largest?.bytesSent ?? 0) ? stat : largest, senderStats[0])
-    if (primary) telemetry.sent = toMetric('sent', primary as unknown as Record<string, unknown>)
+    if (primary) {
+      const metric = toMetric('sent', primary as unknown as Record<string, unknown>)
+      enrichNetworkMetrics(metric, senderStats as unknown as Array<Record<string, unknown>>)
+      metric.targetBitrate = localScreenTargetBitrate ?? metric.targetBitrate
+      telemetry.sent = metric
+    }
   }
   if (selected && !selected.local) {
     const receiverStats = await (selected.track as RemoteVideoTrack).getReceiverStats().catch(() => undefined)
-    if (receiverStats) telemetry.received = toMetric(`received:${selected.id}`, receiverStats as unknown as Record<string, unknown>)
+    if (receiverStats) {
+      const record = receiverStats as unknown as Record<string, unknown>
+      const metric = toMetric(`received:${selected.id}`, record)
+      enrichNetworkMetrics(metric, [record])
+      telemetry.received = metric
+    }
   }
   if (room === current) hooks?.onTelemetry(telemetry)
 }
@@ -527,22 +550,53 @@ async function collectTelemetry(current: Room): Promise<void> {
 function toMetric(key: string, stat: Record<string, unknown>): StreamMetric {
   const bytes = numberValue(stat.bytesSent ?? stat.bytesReceived)
   const packets = numberValue(stat.packetsSent ?? stat.packetsReceived)
+  const packetsLost = numberValue(stat.packetsLost)
   const frames = numberValue(stat.framesSent ?? stat.framesDecoded ?? stat.framesReceived)
   const timestamp = numberValue(stat.timestamp) || performance.now()
   const previous = lastStats.get(key)
-  lastStats.set(key, { bytes, packets, frames, timestamp })
+  lastStats.set(key, { bytes, packets, packetsLost, frames, timestamp })
   const seconds = previous ? Math.max((timestamp - previous.timestamp) / 1000, 0.001) : 0
+  const lostDelta = previous ? Math.max(0, packetsLost - previous.packetsLost) : 0
+  const packetDelta = previous ? Math.max(0, packets - previous.packets) : 0
   return {
+    bytes,
     bitrate: previous ? Math.max(0, ((bytes - previous.bytes) * 8) / seconds) : 0,
     packetRate: previous ? Math.max(0, (packets - previous.packets) / seconds) : 0,
     packets,
-    packetsLost: numberValue(stat.packetsLost),
+    frames,
+    packetsLost,
+    packetLossPercent: previous && packetDelta + lostDelta > 0 ? (lostDelta / (packetDelta + lostDelta)) * 100 : undefined,
     frameRate: numberValue(stat.framesPerSecond) || (previous ? Math.max(0, (frames - previous.frames) / seconds) : undefined),
     width: numberValue(stat.frameWidth),
     height: numberValue(stat.frameHeight),
     targetBitrate: numberValue(stat.targetBitrate),
   }
 }
+
+function enrichNetworkMetrics(metric: StreamMetric, records: Array<Record<string, unknown>>): void {
+  metric.roundTripTimeMs = milliseconds(firstNumber(records, 'roundTripTime'))
+  metric.jitterMs = milliseconds(firstNumber(records, 'jitter'))
+  const jitterBufferDelay = firstNumber(records, 'jitterBufferDelay')
+  const jitterBufferEmitted = firstNumber(records, 'jitterBufferEmittedCount')
+  if (jitterBufferDelay !== undefined && jitterBufferEmitted && jitterBufferEmitted > 0) {
+    metric.jitterBufferDelayMs = (jitterBufferDelay / jitterBufferEmitted) * 1_000
+  }
+  const totalDecodeTime = firstNumber(records, 'totalDecodeTime')
+  const framesDecoded = firstNumber(records, 'framesDecoded')
+  if (totalDecodeTime !== undefined && framesDecoded && framesDecoded > 0) {
+    metric.decodeTimeMs = (totalDecodeTime / framesDecoded) * 1_000
+  }
+}
+
+function firstNumber(records: Array<Record<string, unknown>>, key: string): number | undefined {
+  for (const record of records) {
+    const value = record[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return undefined
+}
+
+function milliseconds(value: number | undefined): number | undefined { return value === undefined ? undefined : value * 1_000 }
 
 function numberValue(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
