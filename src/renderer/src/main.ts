@@ -1,4 +1,4 @@
-import { shareBitrateRangeFor, type AppConfig, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type ShareQuality, type ShareResolution } from '../../shared/types'
+import { shareBitrateRangeFor, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
 import { hideStream, joinRoom, leaveRoom, publishScreen, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
 import { hydrateIcons, icon, labelButton } from './icons'
 
@@ -52,6 +52,7 @@ const audioInput = byId('system-audio', HTMLInputElement)
 const blockDiscordInput = byId('block-discord-audio', HTMLInputElement)
 const resolutionInput = byId('share-resolution', HTMLSelectElement)
 const frameRateInput = byId('share-framerate', HTMLSelectElement)
+const priorityInput = byId('share-priority', HTMLSelectElement)
 const bitrateModeInput = byId('share-bitrate-mode', HTMLSelectElement)
 const fixedBitrateField = byId('fixed-bitrate-field', HTMLLabelElement)
 const bitrateInput = byId('share-bitrate', HTMLInputElement)
@@ -94,6 +95,7 @@ let gridView = false
 let listing = false
 let serverUnavailable = false
 let telemetry: StreamTelemetry = {}
+let captureAccelerationStatus: CaptureAccelerationStatus | null = null
 let lastGridSignature = ''
 let roomsFingerprint = ''
 let selectedAudioOutput = 'default'
@@ -277,6 +279,7 @@ function bind(): void {
   cancelShareButton.addEventListener('click', closePicker)
   resolutionInput.addEventListener('change', syncQualityControls)
   frameRateInput.addEventListener('change', syncQualityControls)
+  priorityInput.addEventListener('change', syncQualityControls)
   bitrateModeInput.addEventListener('change', syncQualityControls)
   bitrateInput.addEventListener('input', syncQualityControls)
   window.sharescreen.onWindowFullscreenChanged((active) => {
@@ -469,7 +472,9 @@ async function popOutVideo(): Promise<void> {
 
 async function openPicker(): Promise<void> {
   if (!currentRoom) return
-  picker.showModal(); clearNote(pickerNote); syncSystemAudioControls(); syncQualityControls(); await loadSources()
+  picker.showModal(); clearNote(pickerNote); syncSystemAudioControls(); syncQualityControls()
+  void loadCaptureAcceleration()
+  await loadSources()
 }
 
 function closePicker(): void { picker.close(); sourcesRequest++; selectedSourceId = null; clearNote(pickerNote); updatePickerControls() }
@@ -487,6 +492,22 @@ async function loadSources(): Promise<void> {
     renderSources(listed.value)
   } catch (error) { selectedSourceId = null; showNote(pickerNote, messageOf(error), 'error') }
   finally { refreshButton.disabled = false; sourcesEl.setAttribute('aria-busy', 'false'); updatePickerControls() }
+}
+
+async function loadCaptureAcceleration(): Promise<void> {
+  try {
+    const status = await window.sharescreen.getCaptureAcceleration()
+    captureAccelerationStatus = status
+    renderTelemetry()
+  } catch {
+    captureAccelerationStatus = null
+  }
+}
+
+function gpuFeatureLabel(status: CaptureAccelerationStatus | null): string {
+  if (!status) return 'Unavailable'
+  if (!status.ready) return 'Checking'
+  return status.videoEncode === 'enabled' ? 'Enabled' : `${status.videoEncode} (CPU fallback possible)`
 }
 
 function renderSources(sources: DesktopSourceInfo[]): void {
@@ -633,12 +654,13 @@ function renderFocusedStreamVolume(useGrid: boolean): void {
 function syncFocusedStreamVolume(): void {
   const stream = streams.find((candidate) => candidate.id === selectedStreamId)
   if (!stream || stream.local) return
-  const value = Math.max(0, Math.min(200, Number(focusedStreamVolumeInput.value) || 0)) / 100
+  const value = Math.max(0, Math.min(100, Number(focusedStreamVolumeInput.value) || 0)) / 100
   streamVolumes.set(stream.id, value)
   focusedStreamVolumeValue.value = `${Math.round(value * 100)}%`
   focusedStreamVolumeValue.textContent = focusedStreamVolumeValue.value
   focusedStreamVolumeInput.title = `Volume for ${stream.participantName}: ${focusedStreamVolumeValue.value}`
   setStreamVolume(stream.id, value)
+  if (stream.muted) setStreamMuted(stream.id, false)
 }
 
 function renderGrid(active: boolean): void {
@@ -689,16 +711,17 @@ function renderGrid(active: boolean): void {
         mute.addEventListener('click', (event) => { event.stopPropagation(); setStreamMuted(stream.id, !stream.muted) })
         audioControls.addEventListener('pointerdown', (event) => event.stopPropagation())
         audioControls.addEventListener('click', (event) => event.stopPropagation())
-        const volume = Object.assign(document.createElement('input'), { type: 'range', className: 'grid-tile-volume', min: '0', max: '200', value: String(Math.round((streamVolumes.get(stream.id) ?? 1) * 100)) })
+        const volume = Object.assign(document.createElement('input'), { type: 'range', className: 'grid-tile-volume', min: '0', max: '100', value: String(Math.round((streamVolumes.get(stream.id) ?? 1) * 100)) })
         volume.setAttribute('aria-label', `Volume for ${stream.participantName}`)
         volume.title = `Volume for ${stream.participantName}: ${volume.value}%`
         const updateVolume = (event: Event) => {
           event.stopPropagation()
-          const value = Math.max(0, Math.min(200, Number((event.currentTarget as HTMLInputElement).value) || 0)) / 100
+          const value = Math.max(0, Math.min(100, Number((event.currentTarget as HTMLInputElement).value) || 0)) / 100
           streamVolumes.set(stream.id, value)
           const input = event.currentTarget as HTMLInputElement
           input.title = `Volume for ${stream.participantName}: ${Math.round(value * 100)}%`
           setStreamVolume(stream.id, value)
+          if (stream.muted) setStreamMuted(stream.id, false)
         }
         volume.addEventListener('input', updateVolume)
         volume.addEventListener('click', (event) => event.stopPropagation())
@@ -750,10 +773,9 @@ function renderMembers(): void {
 
 function syncQualityControls(): void {
   const resolution = resolutionInput.value as ShareResolution
-  for (const option of [...frameRateInput.options]) option.disabled = !isQualityAllowed(resolution, Number(option.value) as ShareFrameRate)
-  if (frameRateInput.selectedOptions[0]?.disabled) frameRateInput.value = resolution === '4k' ? '24' : '60'
   const frameRate = Number(frameRateInput.value) as ShareFrameRate
   const bitrateMode = bitrateModeInput.value as ShareBitrateMode
+  const priority = priorityInput.value as SharePriority
   const range = shareBitrateRangeFor({ resolution, frameRate })
   bitrateInput.min = String(range.min)
   bitrateInput.max = String(range.max)
@@ -764,7 +786,10 @@ function syncQualityControls(): void {
   bitrateValue.value = formatBitrate(bitrate)
   bitrateValue.textContent = bitrateValue.value
   resolutionInput.title = `${formatBitrate(range.min)}–${formatBitrate(range.max)}`
-  frameRateInput.title = resolution === '4k' ? '4K: 5, 15, or 24 FPS' : 'Frame rate'
+  frameRateInput.title = 'Frame rate'
+  priorityInput.title = priority === 'framerate'
+    ? 'Keeps the selected frame rate by reducing resolution when constrained'
+    : 'Keeps image detail by allowing frames to be dropped when constrained'
   bitrateInput.title = `Fixed bitrate: ${formatBitrate(bitrate)}`
   bitrateModeInput.title = bitrateMode === 'fixed' ? `Fixed target: ${formatBitrate(bitrate)}` : `Adaptive range: ${formatBitrate(range.min)}–${formatBitrate(range.max)}`
 }
@@ -789,7 +814,7 @@ function syncAudioVolume(): void {
   audioVolumeInput.value = String(value)
   audioVolumeValue.value = `${value}%`
   audioVolumeValue.textContent = `${value}%`
-  audioVolumeInput.title = `Incoming screen-audio volume: ${value}%`
+  audioVolumeInput.title = `Global incoming audio volume: ${value}%`
   setRemoteAudioVolume(value / 100)
 }
 
@@ -830,14 +855,8 @@ async function onAudioOutputChanged(): Promise<void> {
 }
 
 function readQuality(): ShareQuality | null {
-  const resolution = resolutionInput.value as ShareResolution; const frameRate = Number(frameRateInput.value) as ShareFrameRate; const bitrateMode = bitrateModeInput.value as ShareBitrateMode; const bitrate = Number(bitrateInput.value)
-  if (!isQualityAllowed(resolution, frameRate)) { showNote(pickerNote, 'This resolution and frame rate cannot be used together.', 'error'); return null }
-  return { resolution, frameRate, bitrateMode, bitrate }
-}
-
-function isQualityAllowed(resolution: ShareResolution, frameRate: ShareFrameRate): boolean {
-  if (resolution === '4k') return frameRate === 5 || frameRate === 15 || frameRate === 24
-  return true
+  const resolution = resolutionInput.value as ShareResolution; const frameRate = Number(frameRateInput.value) as ShareFrameRate; const priority = priorityInput.value as SharePriority; const bitrateMode = bitrateModeInput.value as ShareBitrateMode; const bitrate = Number(bitrateInput.value)
+  return { resolution, frameRate, priority, bitrateMode, bitrate }
 }
 
 function renderTelemetry(): void {
@@ -853,8 +872,10 @@ function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, s
   card.hidden = !metric
   if (!metric) return
   const quality = metric.width && metric.height ? `${metric.width} × ${metric.height}` : '—'
+  const capture = metric.captureWidth && metric.captureHeight ? `${metric.captureWidth} × ${metric.captureHeight}${metric.captureFrameRate ? ` @ ${Math.round(metric.captureFrameRate)} fps` : ''}` : undefined
   const baseRows: Array<[string, string]> = [
-    ['Video', quality],
+    ['Encoded', quality],
+    ...(capture ? [['Capture', capture] as [string, string]] : []),
     ['Bitrate', formatBitrate(metric.bitrate)],
     ['Frame rate', metric.frameRate ? `${Math.round(metric.frameRate)} fps` : '—'],
     ['Packet rate', metric.packetRate ? `${Math.round(metric.packetRate)} /s` : '—'],
@@ -865,8 +886,20 @@ function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, s
     ['Data', formatBytes(metric.bytes)],
   ]
   const networkRows: Array<[string, string]> = side === 'host'
-    ? [['Target', formatBitrate(metric.targetBitrate)], ['RTT', formatMilliseconds(metric.roundTripTimeMs)]]
-    : [['Buffer', formatMilliseconds(metric.jitterBufferDelayMs)], ['Decode', formatMilliseconds(metric.decodeTimeMs)]]
+    ? [
+      ['Budget', formatBitrate(metric.maxBitrate)],
+      ['Encoder target', formatBitrate(metric.targetBitrate)],
+      ['GPU encode', gpuFeatureLabel(captureAccelerationStatus)],
+      ['Limit', formatLimitation(metric)],
+      ['RTT', formatMilliseconds(metric.roundTripTimeMs)],
+    ]
+    : [
+      ['Codec', metric.codec ?? '—'],
+      ['Decoder', metric.decoder ?? '—'],
+      ['Dropped', metric.framesDropped === undefined ? '—' : formatCount(metric.framesDropped)],
+      ['Buffer', formatMilliseconds(metric.jitterBufferDelayMs)],
+      ['Decode', formatMilliseconds(metric.decodeTimeMs)],
+    ]
   const rows = [...baseRows.slice(0, 3), ...networkRows, ...baseRows.slice(3)]
   const list = card.querySelector('dl')!
   list.replaceChildren(...rows.map(([label, value]) => {
@@ -882,6 +915,11 @@ function formatMilliseconds(value: number | undefined): string { return value ==
 function formatPacketLoss(metric: StreamMetric): string {
   if (metric.packetLossPercent === undefined) return metric.packetsLost === undefined ? '—' : `${formatCount(metric.packetsLost)} lost`
   return `${metric.packetLossPercent.toFixed(metric.packetLossPercent < 1 ? 2 : 1)}% · ${formatCount(metric.packetsLost ?? 0)} lost`
+}
+function formatLimitation(metric: StreamMetric): string {
+  if (!metric.qualityLimitationReason || metric.qualityLimitationReason === 'none') return 'None'
+  const reason = metric.qualityLimitationReason === 'cpu' ? 'CPU / encoder' : metric.qualityLimitationReason
+  return metric.qualityLimitationDurationMs === undefined ? reason : `${reason} · ${formatMilliseconds(metric.qualityLimitationDurationMs)}`
 }
 function formatCount(value: number): string { return new Intl.NumberFormat().format(Math.round(value)) }
 function formatBytes(value: number): string {

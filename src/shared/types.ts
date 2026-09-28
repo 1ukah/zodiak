@@ -56,13 +56,16 @@ export interface ShareRequest {
   blockDiscordAudio: boolean
 }
 
-export type ShareResolution = '480p' | '720p' | '1080p' | '1440p' | '4k'
+export type ShareResolution = '480p' | '720p' | '1080p' | '1440p'
 export type ShareFrameRate = 5 | 15 | 24 | 30 | 60
 export type ShareBitrateMode = 'dynamic' | 'fixed'
+export type SharePriority = 'quality' | 'framerate'
 
 export interface ShareQuality {
   resolution: ShareResolution
   frameRate: ShareFrameRate
+  /** Chooses Chromium's quality-versus-motion tradeoff when constrained. */
+  priority: SharePriority
   bitrateMode: ShareBitrateMode
   bitrate: number
 }
@@ -78,7 +81,6 @@ export const shareBitrateProfiles: Record<ShareResolution, Record<ShareFrameRate
   '720p': { 5: { min: 250_000, max: 1_000_000 }, 15: { min: 700_000, max: 2_500_000 }, 24: { min: 1_000_000, max: 3_500_000 }, 30: { min: 1_250_000, max: 4_500_000 }, 60: { min: 2_000_000, max: 7_500_000 } },
   '1080p': { 5: { min: 450_000, max: 1_800_000 }, 15: { min: 1_200_000, max: 4_500_000 }, 24: { min: 1_800_000, max: 6_500_000 }, 30: { min: 2_250_000, max: 8_000_000 }, 60: { min: 3_500_000, max: 12_000_000 } },
   '1440p': { 5: { min: 900_000, max: 3_500_000 }, 15: { min: 2_200_000, max: 8_000_000 }, 24: { min: 3_000_000, max: 11_000_000 }, 30: { min: 4_000_000, max: 14_000_000 }, 60: { min: 5_000_000, max: 20_000_000 } },
-  '4k': { 5: { min: 1_500_000, max: 6_000_000 }, 15: { min: 4_000_000, max: 12_000_000 }, 24: { min: 6_000_000, max: 25_000_000 }, 30: { min: 8_000_000, max: 30_000_000 }, 60: { min: 12_000_000, max: 45_000_000 } },
 }
 
 export function shareBitrateRangeFor(quality: Pick<ShareQuality, 'resolution' | 'frameRate'>): ShareBitrateRange {
@@ -94,6 +96,14 @@ export interface ShareStartRequest extends ShareRequest {
   quality: ShareQuality
 }
 
+/** Chromium GPU feature state, collected after Electron's GPU process starts. */
+export interface CaptureAccelerationStatus {
+  ready: boolean
+  videoEncode: string
+  videoDecode: string
+  compositing: string
+}
+
 export type ActionResult<T> = { ok: true; value: T } | { ok: false; error: string }
 
 export const channels = {
@@ -107,6 +117,7 @@ export const channels = {
   deleteRoom: 'rooms:delete',
   listSources: 'sources:list',
   prepareShare: 'share:prepare',
+  getCaptureAcceleration: 'share:acceleration',
   setSharing: 'share:active',
   startSystemAudio: 'audio:start',
   stopSystemAudio: 'audio:stop',
@@ -126,6 +137,7 @@ export interface SharescreenApi {
   deleteRoom: (request: RoomNameRequest) => Promise<ActionResult<true>>
   listSources: () => Promise<ActionResult<DesktopSourceInfo[]>>
   prepareShare: (request: ShareStartRequest) => Promise<ActionResult<true>>
+  getCaptureAcceleration: () => Promise<CaptureAccelerationStatus>
   setSharing: (active: boolean) => Promise<ActionResult<true>>
   startSystemAudio: (excludeDiscord: boolean) => Promise<ActionResult<true>>
   stopSystemAudio: () => Promise<ActionResult<true>>

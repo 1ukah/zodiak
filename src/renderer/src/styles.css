@@ -966,9 +966,9 @@ body.in-room .welcome-mark {
   right: 26px;
   bottom: 24px;
   display: grid;
-  grid-template-columns: repeat(2,minmax(168px,1fr));
+  grid-template-columns: repeat(2,minmax(280px,1fr));
   gap: 8px;
-  width: min(440px,calc(100% - 52px));
+  width: min(680px,calc(100% - 52px));
   pointer-events: auto;
   opacity: .96;
   transition: opacity .18s ease;
@@ -1021,8 +1021,8 @@ body.in-room .welcome-mark {
 }
 @media(max-width:720px) {
   #stream-metrics {
-    grid-template-columns: minmax(168px,1fr);
-    width: min(224px,calc(100% - 52px));
+    grid-template-columns: minmax(280px,1fr);
+    width: min(340px,calc(100% - 52px));
   }
 }
 /* A focused stream uses the right edge for its volume control. */
@@ -1251,12 +1251,15 @@ details summary span {
 .quality-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  /* A fixed bitrate adds a second control only in the right column. Keep the
+     Prioritize field at its natural height instead of stretching it to match. */
+  align-items: start;
   gap: 14px;
 }
 .bitrate-controls {
-  grid-column: 1/-1;
   display: grid;
-  grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+  grid-template-columns: minmax(0,1fr);
+  align-content: start;
   gap: 14px;
 }
 .fixed-bitrate-field span {
