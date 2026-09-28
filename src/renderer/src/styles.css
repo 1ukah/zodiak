@@ -1583,6 +1583,12 @@ body.theater #shell {
   height: 12px;
   color: #a8a0ff;
 }
+.app-titlebar-logo {
+  width: 12px;
+  height: 15px;
+  display: block;
+  pointer-events: none;
+}
 #shell {
   height: calc(100% - 32px);
 }

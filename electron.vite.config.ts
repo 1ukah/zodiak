@@ -1,4 +1,5 @@
 import { defineConfig } from 'electron-vite'
+import { resolve } from 'node:path'
 
 export default defineConfig({
   main: {
@@ -11,5 +12,7 @@ export default defineConfig({
       externalizeDeps: true,
     },
   },
-  renderer: {},
+  renderer: {
+    publicDir: resolve('build'),
+  },
 })

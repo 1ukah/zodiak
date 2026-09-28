@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, powerSaveBlocker, session } from 'electron'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { channels, shareBitrateRangeFor, type CaptureAccelerationStatus, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareResolution, type ShareStartRequest } from '../shared/types'
 import { armCapture, listSources, registerCaptureHandler } from './capture'
@@ -37,7 +38,14 @@ app.on('gpu-info-update', () => { gpuInfoReady = true })
 function appIcon() {
   return nativeImage.createFromPath(app.isPackaged
     ? join(process.resourcesPath, 'app-icon.png')
-    : join(__dirname, '../../build/app-icon.png'))
+    : join(__dirname, '../../build/icon.png'))
+}
+
+function splashIcon() {
+  const svgPath = app.isPackaged
+    ? join(process.resourcesPath, 'icon.svg')
+    : join(__dirname, '../../build/icon.svg')
+  return `data:image/svg+xml;base64,${readFileSync(svgPath).toString('base64')}`
 }
 
 function createSplash(): BrowserWindow {
@@ -53,21 +61,21 @@ function createSplash(): BrowserWindow {
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
   splash.setMenuBarVisibility(false)
-  void splash.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(splashMarkup())}`)
+  void splash.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(splashMarkup(splashIcon()))}`)
   return splash
 }
 
-function splashMarkup(): string {
+function splashMarkup(brandIcon: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     :root { color-scheme: dark; } * { box-sizing: border-box; }
     body { margin:0; min-height:100vh; display:grid; place-items:center; background:#14151a; color:#eeeef2; font:14px "Segoe UI",sans-serif; border:1px solid #34323f; -webkit-app-region:drag; }
     main { width:240px; } .brand { display:flex; align-items:center; flex-direction:column; margin-bottom:22px; }
-    .mark { color:#a8a0ff; } .track { height:3px; overflow:hidden; border-radius:9px; background:#30303c; }
+    .mark { width:80px; height:100px; display:block; } .track { height:3px; overflow:hidden; border-radius:9px; background:#30303c; }
     .bar { width:42%; height:100%; border-radius:inherit; background:#a8a0ff; animation:loading 1.35s ease-in-out infinite; }
     #status { margin:9px 0 0; color:#898b9b; font-size:10px; text-align:center; }
     @keyframes loading { from { transform:translateX(-120%); } to { transform:translateX(340%); } }
     @media(prefers-reduced-motion:reduce) { .bar { animation:none; width:100%; opacity:.6; } }
-  </style></head><body><main><div class="brand"><span class="mark"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span></div><div class="track" role="progressbar" aria-label="Loading"><div class="bar"></div></div><p id="status" role="status">Starting…</p></main>
+  </style></head><body><main><div class="brand"><img class="mark" src="${brandIcon}" alt="" /></div><div class="track" role="progressbar" aria-label="Loading"><div class="bar"></div></div><p id="status" role="status">Starting…</p></main>
   <script>window.setSplashStatus = (message) => { document.getElementById('status').textContent = message }</script></body></html>`
 }
 

@@ -1,44 +1,62 @@
-# Shown before Chromium starts; no percentage is implied by the activity track.
 Add-Type -AssemblyName System.Drawing
-$bitmap = New-Object System.Drawing.Bitmap 360,220
-$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-$graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-$graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-$graphics.Clear([System.Drawing.ColorTranslator]::FromHtml('#14151a'))
-$accent = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml('#a8a0ff'))
-$track = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml('#30303c'))
-$pen = New-Object System.Drawing.Pen ([System.Drawing.ColorTranslator]::FromHtml('#a8a0ff')),2
-$graphics.DrawRectangle($pen,166,56,28,19)
-$graphics.DrawLine($pen,180,75,180,81)
-$graphics.DrawLine($pen,173,82,187,82)
-$graphics.FillRectangle($track,60,151,240,3)
-for ($segment = 0; $segment -lt 8; $segment++) { $graphics.FillRectangle($accent,(60 + $segment * 30),151,16,3) }
-$border = New-Object System.Drawing.Pen ([System.Drawing.ColorTranslator]::FromHtml('#34323f')),1
-$graphics.DrawRectangle($border,0,0,359,219)
-$bitmap.Save((Join-Path $PSScriptRoot '../build/launch-splash.bmp'),[System.Drawing.Imaging.ImageFormat]::Bmp)
-$border.Dispose(); $pen.Dispose(); $accent.Dispose(); $track.Dispose(); $graphics.Dispose(); $bitmap.Dispose()
+$fallbackIconPath = Join-Path $PSScriptRoot '../build/icon.png'
 
-# Matching application / taskbar icon, also embedded into the portable executable.
+function Draw-ContainedImage([System.Drawing.Graphics]$graphics, [System.Drawing.Image]$image, [int]$x, [int]$y, [int]$width, [int]$height) {
+  $scale = [Math]::Min($width / $image.Width, $height / $image.Height)
+  $drawWidth = [int][Math]::Round($image.Width * $scale)
+  $drawHeight = [int][Math]::Round($image.Height * $scale)
+  $drawX = $x + [int][Math]::Round(($width - $drawWidth) / 2)
+  $drawY = $y + [int][Math]::Round(($height - $drawHeight) / 2)
+  $graphics.DrawImage($image, $drawX, $drawY, $drawWidth, $drawHeight)
+}
+
+function Convert-ToPngBytes([System.Drawing.Bitmap]$bitmap) {
+  $stream = New-Object System.IO.MemoryStream
+  $bitmap.Save($stream,[System.Drawing.Imaging.ImageFormat]::Png)
+  $bytes = $stream.ToArray()
+  $stream.Dispose()
+  return $bytes
+}
+
+function Write-Icon([string]$iconFileName, [byte[]]$iconPng) {
+  $iconStream = [System.IO.File]::Create((Join-Path $PSScriptRoot "../build/$iconFileName"))
+  $iconWriter = New-Object System.IO.BinaryWriter $iconStream
+  $iconWriter.Write([uint16]0); $iconWriter.Write([uint16]1); $iconWriter.Write([uint16]1)
+  $iconWriter.Write([byte]0); $iconWriter.Write([byte]0); $iconWriter.Write([byte]0); $iconWriter.Write([byte]0)
+  $iconWriter.Write([uint16]1); $iconWriter.Write([uint16]32); $iconWriter.Write([uint32]$iconPng.Length); $iconWriter.Write([uint32]22)
+  $iconWriter.Write($iconPng); $iconWriter.Dispose(); $iconStream.Dispose()
+}
+
+# The executable keeps the supplied white mark.
+$sourceIcon = [System.Drawing.Image]::FromFile($fallbackIconPath)
 $iconBitmap = New-Object System.Drawing.Bitmap 256,256
 $iconGraphics = [System.Drawing.Graphics]::FromImage($iconBitmap)
 $iconGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+$iconGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
 $iconGraphics.Clear([System.Drawing.Color]::Transparent)
-$shape = New-Object System.Drawing.Drawing2D.GraphicsPath
-$shape.AddArc(8,8,88,88,180,90); $shape.AddArc(160,8,88,88,270,90)
-$shape.AddArc(160,160,88,88,0,90); $shape.AddArc(8,160,88,88,90,90); $shape.CloseFigure()
-$iconBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml('#a8a0ff'))
-$iconGraphics.FillPath($iconBrush,$shape)
-$iconPen = New-Object System.Drawing.Pen ([System.Drawing.ColorTranslator]::FromHtml('#17132b')),12
-$iconPen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
-$iconGraphics.DrawRectangle($iconPen,59,65,138,100)
-$iconGraphics.DrawLine($iconPen,128,168,128,192)
-$iconGraphics.DrawLine($iconPen,98,195,158,195)
-$iconBitmap.Save((Join-Path $PSScriptRoot '../build/app-icon.png'),[System.Drawing.Imaging.ImageFormat]::Png)
-$iconPng = [System.IO.File]::ReadAllBytes((Join-Path $PSScriptRoot '../build/app-icon.png'))
-$iconStream = [System.IO.File]::Create((Join-Path $PSScriptRoot '../build/icon.ico'))
-$iconWriter = New-Object System.IO.BinaryWriter $iconStream
-$iconWriter.Write([uint16]0); $iconWriter.Write([uint16]1); $iconWriter.Write([uint16]1)
-$iconWriter.Write([byte]0); $iconWriter.Write([byte]0); $iconWriter.Write([byte]0); $iconWriter.Write([byte]0)
-$iconWriter.Write([uint16]1); $iconWriter.Write([uint16]32); $iconWriter.Write([uint32]$iconPng.Length); $iconWriter.Write([uint32]22)
-$iconWriter.Write($iconPng); $iconWriter.Dispose(); $iconStream.Dispose()
-$iconPen.Dispose(); $iconBrush.Dispose(); $shape.Dispose(); $iconGraphics.Dispose(); $iconBitmap.Dispose()
+Draw-ContainedImage $iconGraphics $sourceIcon 0 0 256 256
+$iconPng = Convert-ToPngBytes $iconBitmap
+
+$installerBitmap = New-Object System.Drawing.Bitmap 256,256
+$installerGraphics = [System.Drawing.Graphics]::FromImage($installerBitmap)
+$installerGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+$installerGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+$installerGraphics.Clear([System.Drawing.Color]::Transparent)
+Draw-ContainedImage $installerGraphics $sourceIcon 0 0 256 256
+for ($y = 0; $y -lt $installerBitmap.Height; $y++) {
+  for ($x = 0; $x -lt $installerBitmap.Width; $x++) {
+    $alpha = $installerBitmap.GetPixel($x, $y).A
+    if ($alpha -gt 0) { $installerBitmap.SetPixel($x, $y, [System.Drawing.Color]::FromArgb($alpha, 0, 0, 0)) }
+  }
+}
+Write-Icon 'icon.ico' $iconPng
+
+# The assisted NSIS wizard has a white header. Give it a separate black logo
+# while keeping the setup executable's icon white.
+$headerBitmap = New-Object System.Drawing.Bitmap 150,57
+$headerGraphics = [System.Drawing.Graphics]::FromImage($headerBitmap)
+$headerGraphics.Clear([System.Drawing.Color]::White)
+$headerGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+$headerGraphics.DrawImage($installerBitmap, 106, 8, 40, 40)
+$headerBitmap.Save((Join-Path $PSScriptRoot '../build/installerHeader.bmp'),[System.Drawing.Imaging.ImageFormat]::Bmp)
+$headerGraphics.Dispose(); $headerBitmap.Dispose(); $installerGraphics.Dispose(); $installerBitmap.Dispose(); $iconGraphics.Dispose(); $iconBitmap.Dispose(); $sourceIcon.Dispose()
