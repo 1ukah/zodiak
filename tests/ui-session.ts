@@ -13,8 +13,12 @@ export async function joinRoom(options) {
   hooks.onStreams([])
 }
 export async function leaveRoom() { streams = []; hooks?.onStreams([]); hooks?.onParticipants([]); hooks?.onConnection('offline') }
-export async function publishScreen() { state.emitStreams([{ id: 'local', participantId: 'me', participantName: 'Alex Morgan', local: true, muted: false }]) }
+export async function publishScreen(_withAudio, _excludeDiscord, quality) { state.quality = quality; state.emitStreams([{ id: 'local', participantId: 'me', participantName: 'Alex Morgan', local: true, muted: false }]) }
 export async function unpublishScreen() { state.emitStreams(streams.filter(s => !s.local)) }
+export async function updateDisplayName(name) {
+  hooks.onParticipants([{ id: 'me', name, local: true }, { id: 'sam', name: 'Sam Rivera', local: false }, { id: 'jo', name: 'Jordan Lee', local: false }])
+  state.emitStreams(streams.map(stream => stream.local ? { ...stream, participantName: name } : stream))
+}
 export function selectStream(id) { state.selected = id }
 export function setGridVideos(targets) { state.targets = [...targets.keys()] }
 export function setRemoteAudioOutputDevice(id) { state.device = id; return Promise.resolve() }

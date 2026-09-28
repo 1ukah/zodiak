@@ -36,7 +36,9 @@ export async function createParticipantToken(value: unknown): Promise<TokenRespo
       canPublish: true,
       canSubscribe: true,
       canPublishData: false,
-      canUpdateOwnMetadata: false,
+      // Lets a connected participant update their own display name without
+      // granting access to any other participant's profile.
+      canUpdateOwnMetadata: true,
       canPublishSources: [TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO],
     })
     return {

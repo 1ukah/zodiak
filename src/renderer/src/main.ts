@@ -1,5 +1,5 @@
-import { shareBitrateFor, type AppConfig, type DesktopSourceInfo, type Role, type RoomSummary, type ShareFrameRate, type ShareQuality, type ShareResolution } from '../../shared/types'
-import { joinRoom, leaveRoom, publishScreen, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
+import { shareBitrateRangeFor, type AppConfig, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type ShareQuality, type ShareResolution } from '../../shared/types'
+import { joinRoom, leaveRoom, publishScreen, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
 import { hydrateIcons, icon, labelButton } from './icons'
 
 hydrateIcons()
@@ -51,6 +51,10 @@ const audioInput = byId('system-audio', HTMLInputElement)
 const blockDiscordInput = byId('block-discord-audio', HTMLInputElement)
 const resolutionInput = byId('share-resolution', HTMLSelectElement)
 const frameRateInput = byId('share-framerate', HTMLSelectElement)
+const bitrateModeInput = byId('share-bitrate-mode', HTMLSelectElement)
+const fixedBitrateField = byId('fixed-bitrate-field', HTMLLabelElement)
+const bitrateInput = byId('share-bitrate', HTMLInputElement)
+const bitrateValue = byId('share-bitrate-value', HTMLOutputElement)
 const pickerNote = byId('picker-note', HTMLParagraphElement)
 const goLiveButton = byId('go-live', HTMLButtonElement)
 const cancelShareButton = byId('cancel-share', HTMLButtonElement)
@@ -170,7 +174,21 @@ function bind(): void {
   byId('save-settings', HTMLButtonElement).addEventListener('click', async () => {
     const button = byId('save-settings', HTMLButtonElement)
     button.disabled = true
-    try { if (await persistConfig()) { settingsDialog.close(); void refreshRooms() } }
+    try {
+      const previousName = savedConfig?.displayName
+      const saved = await persistConfig()
+      if (!saved) return
+      if (currentRoom && saved.displayName !== previousName) {
+        try {
+          await updateDisplayName(saved.displayName)
+        } catch (error) {
+          showNote(settingsNote, `Saved for future rooms, but could not update this room: ${messageOf(error)}`, 'error')
+          return
+        }
+      }
+      settingsDialog.close()
+      void refreshRooms()
+    }
     finally { button.disabled = false }
   })
   byId('save-server-settings', HTMLButtonElement).addEventListener('click', async () => {
@@ -241,6 +259,8 @@ function bind(): void {
   cancelShareButton.addEventListener('click', closePicker)
   resolutionInput.addEventListener('change', syncQualityControls)
   frameRateInput.addEventListener('change', syncQualityControls)
+  bitrateModeInput.addEventListener('change', syncQualityControls)
+  bitrateInput.addEventListener('input', syncQualityControls)
   window.sharescreen.onWindowFullscreenChanged((active) => {
     windowFullscreen = active
     if (!active) setTheater(false)
@@ -673,9 +693,20 @@ function syncQualityControls(): void {
   for (const option of [...frameRateInput.options]) option.disabled = !isQualityAllowed(resolution, Number(option.value) as ShareFrameRate)
   if (frameRateInput.selectedOptions[0]?.disabled) frameRateInput.value = resolution === '4k' ? '24' : '60'
   const frameRate = Number(frameRateInput.value) as ShareFrameRate
-  const bitrate = shareBitrateFor({ resolution, frameRate })
-  resolutionInput.title = formatBitrate(bitrate)
-  frameRateInput.title = resolution === '4k' ? '4K: 15 or 24 FPS' : 'Frame rate'
+  const bitrateMode = bitrateModeInput.value as ShareBitrateMode
+  const range = shareBitrateRangeFor({ resolution, frameRate })
+  bitrateInput.min = String(range.min)
+  bitrateInput.max = String(range.max)
+  const selectedBitrate = Number(bitrateInput.value)
+  if (!Number.isFinite(selectedBitrate) || selectedBitrate < range.min || selectedBitrate > range.max) bitrateInput.value = String(range.max)
+  const bitrate = Number(bitrateInput.value)
+  fixedBitrateField.hidden = bitrateMode !== 'fixed'
+  bitrateValue.value = formatBitrate(bitrate)
+  bitrateValue.textContent = bitrateValue.value
+  resolutionInput.title = `${formatBitrate(range.min)}–${formatBitrate(range.max)}`
+  frameRateInput.title = resolution === '4k' ? '4K: 5, 15, or 24 FPS' : 'Frame rate'
+  bitrateInput.title = `Fixed bitrate: ${formatBitrate(bitrate)}`
+  bitrateModeInput.title = bitrateMode === 'fixed' ? `Fixed target: ${formatBitrate(bitrate)}` : `Adaptive range: ${formatBitrate(range.min)}–${formatBitrate(range.max)}`
 }
 
 function syncSystemAudioControls(): void {
@@ -739,13 +770,13 @@ async function onAudioOutputChanged(): Promise<void> {
 }
 
 function readQuality(): ShareQuality | null {
-  const resolution = resolutionInput.value as ShareResolution; const frameRate = Number(frameRateInput.value) as ShareFrameRate
+  const resolution = resolutionInput.value as ShareResolution; const frameRate = Number(frameRateInput.value) as ShareFrameRate; const bitrateMode = bitrateModeInput.value as ShareBitrateMode; const bitrate = Number(bitrateInput.value)
   if (!isQualityAllowed(resolution, frameRate)) { showNote(pickerNote, 'This resolution and frame rate cannot be used together.', 'error'); return null }
-  return { resolution, frameRate }
+  return { resolution, frameRate, bitrateMode, bitrate }
 }
 
 function isQualityAllowed(resolution: ShareResolution, frameRate: ShareFrameRate): boolean {
-  if (resolution === '4k') return frameRate === 15 || frameRate === 24
+  if (resolution === '4k') return frameRate === 5 || frameRate === 15 || frameRate === 24
   return true
 }
 

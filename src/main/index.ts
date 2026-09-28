@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, powerSaveBlocker, session } from 'electron'
 import { join } from 'node:path'
-import { channels, type ShareFrameRate, type ShareResolution, type ShareStartRequest } from '../shared/types'
+import { channels, shareBitrateRangeFor, type ShareBitrateMode, type ShareFrameRate, type ShareResolution, type ShareStartRequest } from '../shared/types'
 import { armCapture, listSources, registerCaptureHandler } from './capture'
 import { startSystemAudio, stopSystemAudio } from './system-audio'
 import { loadConfig, saveConfig } from './config'
@@ -180,28 +180,38 @@ function parseShareRequest(value: unknown): ShareStartRequest {
   if (!isRecord(value.quality)) throw new Error('Invalid share quality')
   const resolution = value.quality.resolution
   const frameRate = value.quality.frameRate
-  if (!isResolution(resolution) || !isFrameRate(frameRate) || !isValidQuality(resolution, frameRate)) {
+  const bitrateMode = value.quality.bitrateMode
+  const bitrate = value.quality.bitrate
+  if (!isResolution(resolution) || !isFrameRate(frameRate) || !isBitrateMode(bitrateMode) || !isValidQuality(resolution, frameRate)) {
     throw new Error('This resolution and frame rate cannot be used together')
+  }
+  const bitrateRange = shareBitrateRangeFor({ resolution, frameRate })
+  if (typeof bitrate !== 'number' || !Number.isInteger(bitrate) || bitrate < bitrateRange.min || bitrate > bitrateRange.max) {
+    throw new Error('The fixed bitrate must be within the selected quality range')
   }
   if (value.blockDiscordAudio && !value.withAudio) throw new Error('Discord blocking requires system audio')
   return {
     sourceId: value.sourceId,
     withAudio: value.withAudio,
     blockDiscordAudio: value.blockDiscordAudio,
-    quality: { resolution, frameRate },
+    quality: { resolution, frameRate, bitrateMode, bitrate },
   }
 }
 
 function isResolution(value: unknown): value is ShareResolution {
-  return value === '480p' || value === '720p' || value === '1080p' || value === '4k'
+  return value === '480p' || value === '720p' || value === '1080p' || value === '1440p' || value === '4k'
 }
 
 function isFrameRate(value: unknown): value is ShareFrameRate {
-  return value === 15 || value === 24 || value === 30 || value === 60
+  return value === 5 || value === 15 || value === 24 || value === 30 || value === 60
+}
+
+function isBitrateMode(value: unknown): value is ShareBitrateMode {
+  return value === 'dynamic' || value === 'fixed'
 }
 
 function isValidQuality(resolution: ShareResolution, frameRate: ShareFrameRate): boolean {
-  if (resolution === '4k') return frameRate === 15 || frameRate === 24
+  if (resolution === '4k') return frameRate === 5 || frameRate === 15 || frameRate === 24
   return true
 }
 

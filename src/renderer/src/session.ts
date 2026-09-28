@@ -92,6 +92,7 @@ let statsTimer: ReturnType<typeof window.setInterval> | null = null
 let lastStats = new Map<string, CounterSample>()
 let telemetryInFlight = false
 let localScreenTargetBitrate: number | undefined
+let localParticipantName: string | undefined
 
 interface CounterSample {
   bytes: number
@@ -101,8 +102,8 @@ interface CounterSample {
   timestamp: number
 }
 
-// The selected profile is an upper bound. WebRTC lowers it when the network or
-// the receiver's visible tile cannot sustain the requested quality.
+// The selected profile is an upper bound. WebRTC always retains congestion
+// control, including with a fixed target, to avoid overwhelming the network.
 export async function joinRoom(args: {
   url: string
   token: string
@@ -156,6 +157,9 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
         simulcast: false,
         degradationPreference: 'maintain-resolution',
         screenShareEncoding: {
+          // The selected profile is the encoder ceiling. Browsers expose no
+          // minimum bitrate, so congestion control can still reduce the actual
+          // send rate, including when the user selects a fixed target.
           maxBitrate: shareBitrateFor(quality),
           maxFramerate: quality.frameRate,
           priority: 'high',
@@ -181,6 +185,15 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
     await closeSystemAudio()
     throw new Error(captureMessage(error))
   }
+}
+
+/** Updates the local participant and lets LiveKit broadcast the new name. */
+export async function updateDisplayName(name: string): Promise<void> {
+  const current = requireRoom()
+  await current.localParticipant.setName(name)
+  localParticipantName = name
+  refreshParticipants(current)
+  refreshStreams(current)
 }
 
 export async function unpublishScreen(): Promise<void> {
@@ -292,6 +305,11 @@ function bindRoom(next: Room): void {
     refreshParticipants(next)
     refreshStreams(next)
   })
+  next.on(RoomEvent.ParticipantNameChanged, () => {
+    if (room !== next) return
+    refreshParticipants(next)
+    refreshStreams(next)
+  })
   next.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
     if (room !== next) return
     if (isScreenAudio(track)) void attachAudio(track, participant)
@@ -327,7 +345,7 @@ function refreshStreams(current: Room): void {
     next,
     current.localParticipant.getTrackPublication(Track.Source.ScreenShare),
     current.localParticipant.identity,
-    current.localParticipant.name,
+    displayNameForLocal(current),
   )
   current.remoteParticipants.forEach((participant) => {
     participant.trackPublications.forEach((publication) => addRemoteStream(next, publication, participant))
@@ -344,13 +362,17 @@ function refreshStreams(current: Room): void {
 function refreshParticipants(current: Room): void {
   const next: RoomParticipant[] = [{
     id: current.localParticipant.identity,
-    name: current.localParticipant.name || 'You',
+    name: displayNameForLocal(current),
     local: true,
   }]
   current.remoteParticipants.forEach((participant) => {
     next.push({ id: participant.identity, name: participant.name || participant.identity, local: false })
   })
   hooks?.onParticipants(next)
+}
+
+function displayNameForLocal(current: Room): string {
+  return localParticipantName || current.localParticipant.name || 'You'
 }
 
 function addLocalStream(
@@ -495,6 +517,7 @@ function clearMedia(): void {
   remoteAudioTracks.clear()
   remoteStreamVolumes.clear()
   localScreenTargetBitrate = undefined
+  localParticipantName = undefined
   if (targets) targets.video.srcObject = null
   hooks?.onStreams([])
   hooks?.onParticipants([])

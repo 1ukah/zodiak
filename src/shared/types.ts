@@ -50,23 +50,38 @@ export interface ShareRequest {
   blockDiscordAudio: boolean
 }
 
-export type ShareResolution = '480p' | '720p' | '1080p' | '4k'
-export type ShareFrameRate = 15 | 24 | 30 | 60
+export type ShareResolution = '480p' | '720p' | '1080p' | '1440p' | '4k'
+export type ShareFrameRate = 5 | 15 | 24 | 30 | 60
+export type ShareBitrateMode = 'dynamic' | 'fixed'
 
 export interface ShareQuality {
   resolution: ShareResolution
   frameRate: ShareFrameRate
+  bitrateMode: ShareBitrateMode
+  bitrate: number
 }
 
-export const shareBitrateProfiles: Record<ShareResolution, Record<ShareFrameRate, number>> = {
-  '480p': { 15: 1_500_000, 24: 2_000_000, 30: 2_500_000, 60: 4_000_000 },
-  '720p': { 15: 2_500_000, 24: 3_500_000, 30: 4_500_000, 60: 7_500_000 },
-  '1080p': { 15: 4_500_000, 24: 6_500_000, 30: 8_000_000, 60: 12_000_000 },
-  '4k': { 15: 12_000_000, 24: 25_000_000, 30: 30_000_000, 60: 45_000_000 },
+export interface ShareBitrateRange {
+  min: number
+  max: number
+}
+
+/** Adaptive bitrate bounds, in bits per second, for each quality profile. */
+export const shareBitrateProfiles: Record<ShareResolution, Record<ShareFrameRate, ShareBitrateRange>> = {
+  '480p': { 5: { min: 150_000, max: 600_000 }, 15: { min: 400_000, max: 1_500_000 }, 24: { min: 600_000, max: 2_000_000 }, 30: { min: 750_000, max: 2_500_000 }, 60: { min: 1_200_000, max: 4_000_000 } },
+  '720p': { 5: { min: 250_000, max: 1_000_000 }, 15: { min: 700_000, max: 2_500_000 }, 24: { min: 1_000_000, max: 3_500_000 }, 30: { min: 1_250_000, max: 4_500_000 }, 60: { min: 2_000_000, max: 7_500_000 } },
+  '1080p': { 5: { min: 450_000, max: 1_800_000 }, 15: { min: 1_200_000, max: 4_500_000 }, 24: { min: 1_800_000, max: 6_500_000 }, 30: { min: 2_250_000, max: 8_000_000 }, 60: { min: 3_500_000, max: 12_000_000 } },
+  '1440p': { 5: { min: 900_000, max: 3_500_000 }, 15: { min: 2_200_000, max: 8_000_000 }, 24: { min: 3_000_000, max: 11_000_000 }, 30: { min: 4_000_000, max: 14_000_000 }, 60: { min: 5_000_000, max: 20_000_000 } },
+  '4k': { 5: { min: 1_500_000, max: 6_000_000 }, 15: { min: 4_000_000, max: 12_000_000 }, 24: { min: 6_000_000, max: 25_000_000 }, 30: { min: 8_000_000, max: 30_000_000 }, 60: { min: 12_000_000, max: 45_000_000 } },
+}
+
+export function shareBitrateRangeFor(quality: Pick<ShareQuality, 'resolution' | 'frameRate'>): ShareBitrateRange {
+  return shareBitrateProfiles[quality.resolution][quality.frameRate]
 }
 
 export function shareBitrateFor(quality: ShareQuality): number {
-  return shareBitrateProfiles[quality.resolution][quality.frameRate]
+  const range = shareBitrateRangeFor(quality)
+  return quality.bitrateMode === 'fixed' ? quality.bitrate : range.max
 }
 
 export interface ShareStartRequest extends ShareRequest {
