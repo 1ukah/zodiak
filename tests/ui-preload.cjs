@@ -11,6 +11,6 @@ contextBridge.exposeInMainWorld('sharescreen', {
   deleteRoom: ({ name }) => { rooms = rooms.filter(r => r.name !== name); return ok(true) },
   createToken: ({ room }) => ok({ url: config.url, token: 'ui-test', identity: 'me', room, role: 'viewer' }),
   listSources: () => ok([{ id: 'screen:1', name: 'Entire screen', thumbnail: '' }, { id: 'window:1', name: 'Browser window', thumbnail: '' }]),
-  prepareShare: () => ok(true), setSharing: () => ok(true), startSystemAudio: () => ok(true), stopSystemAudio: () => ok(true), onSystemAudio: () => () => {},
+  prepareShare: () => ok(true), getCaptureAcceleration: () => Promise.resolve({ ready: true, videoEncode: 'enabled', videoDecode: 'enabled', compositing: 'enabled' }), setSharing: () => ok(true), startSystemAudio: () => ok(true), stopSystemAudio: () => ok(true), onSystemAudio: () => () => {},
   setWindowFullscreen: active => ok(Boolean(active)), onWindowFullscreenChanged: () => () => {},
 })

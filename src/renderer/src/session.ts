@@ -11,7 +11,7 @@ import {
   type RemoteTrackPublication,
   type RemoteVideoTrack,
 } from 'livekit-client'
-import { shareBitrateFor, type ShareQuality } from '../../shared/types'
+import { shareBitrateFor, type SharePriority, type ShareQuality } from '../../shared/types'
 import { closeSystemAudio, openSystemAudioTrack } from './system-audio'
 
 export interface MediaTargets {
@@ -50,7 +50,16 @@ export interface StreamMetric {
   frameRate?: number
   width?: number
   height?: number
+  captureWidth?: number
+  captureHeight?: number
+  captureFrameRate?: number
   targetBitrate?: number
+  maxBitrate?: number
+  qualityLimitationReason?: string
+  qualityLimitationDurationMs?: number
+  framesDropped?: number
+  codec?: string
+  decoder?: string
   packetLossPercent?: number
   roundTripTimeMs?: number
   jitterMs?: number
@@ -158,6 +167,7 @@ export async function joinRoom(args: {
 export async function publishScreen(withAudio: boolean, excludeDiscord: boolean, quality: ShareQuality): Promise<void> {
   const current = requireRoom()
   const dimensions = dimensionsFor(quality)
+  const preference = encodingPreferenceFor(quality.priority)
   let protectedAudio: MediaStreamTrack | null = null
   try {
     if (withAudio) protectedAudio = await openSystemAudioTrack(excludeDiscord)
@@ -167,13 +177,13 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
         // Chromium loopback is already mixed. Publish the protected WASAPI
         // process-loopback track instead so this app's audio cannot feed back.
         audio: false,
-        contentHint: 'detail',
+        contentHint: preference.contentHint,
         resolution: { width: dimensions.width, height: dimensions.height, frameRate: quality.frameRate },
       },
       {
         videoCodec: 'h264',
         simulcast: false,
-        degradationPreference: 'maintain-resolution',
+        degradationPreference: preference.degradationPreference,
         screenShareEncoding: {
           // The selected profile is the encoder ceiling. Browsers expose no
           // minimum bitrate, so congestion control can still reduce the actual
@@ -293,7 +303,7 @@ export function setStreamMuted(id: string, muted: boolean): void {
 export function setStreamVolume(id: string, volume: number): void {
   const record = streams.get(id)
   if (!record || record.local) return
-  const next = Math.max(0, Math.min(2, volume))
+  const next = Math.max(0, Math.min(1, volume))
   remoteStreamVolumes.set(record.participantId, next)
   const element = remoteAudio.get(record.participantId)
   if (element) applyAudioVolume(record.participantId, element)
@@ -608,7 +618,7 @@ function removeRemoteAudio(identity: string): void {
 }
 
 function applyAudioVolume(identity: string, element: HTMLAudioElement): void {
-  const volume = Math.min(2, remoteAudioVolume * (remoteStreamVolumes.get(identity) ?? 1))
+  const volume = remoteAudioVolume * (remoteStreamVolumes.get(identity) ?? 1)
   const gain = getAudioGain(identity, element)
   if (gain) gain.gain.value = volume
   else element.volume = Math.min(1, volume)
@@ -703,7 +713,13 @@ async function collectTelemetry(current: Room): Promise<void> {
     if (primary) {
       const metric = toMetric('sent', primary as unknown as Record<string, unknown>)
       enrichNetworkMetrics(metric, senderStats as unknown as Array<Record<string, unknown>>)
-      metric.targetBitrate = localScreenTargetBitrate ?? metric.targetBitrate
+      // This is our cap; retain Chromium's own target bitrate separately so the
+      // diagnostics can distinguish a configured limit from bandwidth estimation.
+      metric.maxBitrate = localScreenTargetBitrate
+      const settings = localTrack.mediaStreamTrack.getSettings()
+      metric.captureWidth = numberValue(settings.width)
+      metric.captureHeight = numberValue(settings.height)
+      metric.captureFrameRate = numberValue(settings.frameRate)
       telemetry.sent = metric
     }
   }
@@ -742,6 +758,11 @@ function toMetric(key: string, stat: Record<string, unknown>): StreamMetric {
     width: numberValue(stat.frameWidth),
     height: numberValue(stat.frameHeight),
     targetBitrate: numberValue(stat.targetBitrate),
+    qualityLimitationReason: stringValue(stat.qualityLimitationReason),
+    qualityLimitationDurationMs: activeLimitationDurationMs(stat),
+    framesDropped: numberValue(stat.framesDropped),
+    codec: stringValue(stat.mimeType),
+    decoder: stringValue(stat.decoderImplementation),
   }
 }
 
@@ -774,12 +795,33 @@ function numberValue(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+function activeLimitationDurationMs(stat: Record<string, unknown>): number | undefined {
+  const reason = stringValue(stat.qualityLimitationReason)
+  const durations = stat.qualityLimitationDurations
+  if (!reason || reason === 'none' || !durations || typeof durations !== 'object') return undefined
+  const seconds = (durations as Record<string, unknown>)[reason]
+  return typeof seconds === 'number' && Number.isFinite(seconds) ? seconds * 1_000 : undefined
+}
+
 
 function dimensionsFor(quality: ShareQuality): { width: number; height: number } {
   if (quality.resolution === '480p') return { width: 854, height: 480 }
   if (quality.resolution === '720p') return { width: 1280, height: 720 }
   if (quality.resolution === '1080p') return { width: 1920, height: 1080 }
-  return { width: 3840, height: 2160 }
+  return { width: 2560, height: 1440 }
+}
+
+function encodingPreferenceFor(priority: SharePriority): {
+  contentHint: 'detail' | 'motion'
+  degradationPreference: RTCDegradationPreference
+} {
+  return priority === 'framerate'
+    ? { contentHint: 'motion', degradationPreference: 'maintain-framerate' }
+    : { contentHint: 'detail', degradationPreference: 'maintain-resolution' }
 }
 
 function captureMessage(error: unknown): string {

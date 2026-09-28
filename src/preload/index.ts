@@ -12,6 +12,7 @@ const api = {
   deleteRoom: (request) => ipcRenderer.invoke(channels.deleteRoom, request),
   listSources: () => ipcRenderer.invoke(channels.listSources),
   prepareShare: (request) => ipcRenderer.invoke(channels.prepareShare, request),
+  getCaptureAcceleration: () => ipcRenderer.invoke(channels.getCaptureAcceleration),
   setSharing: (active) => ipcRenderer.invoke(channels.setSharing, active),
   startSystemAudio: (excludeDiscord) => ipcRenderer.invoke(channels.startSystemAudio, excludeDiscord),
   stopSystemAudio: () => ipcRenderer.invoke(channels.stopSystemAudio),
