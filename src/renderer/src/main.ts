@@ -1,5 +1,5 @@
 import { shareBitrateRangeFor, type AppConfig, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type ShareQuality, type ShareResolution } from '../../shared/types'
-import { joinRoom, leaveRoom, publishScreen, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
+import { hideStream, joinRoom, leaveRoom, publishScreen, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
 import { hydrateIcons, icon, labelButton } from './icons'
 
 hydrateIcons()
@@ -33,6 +33,7 @@ const focusedStreamVolume = byId('focused-stream-volume', HTMLDivElement)
 const focusedStreamVolumeInput = byId('focused-stream-volume-input', HTMLInputElement)
 const focusedStreamVolumeValue = byId('focused-stream-volume-value', HTMLOutputElement)
 const focusedStreamMuteButton = byId('focused-stream-mute', HTMLButtonElement)
+const focusedStreamHideButton = byId('focused-stream-hide', HTMLButtonElement)
 const audioRack = elementById('remote-audio-rack')
 const waiting = elementById('waiting')
 const waitingMessage = byId('waiting-message', HTMLParagraphElement)
@@ -115,11 +116,14 @@ const hooks: SessionHooks = {
     renderChrome()
   },
   onStreams: (next) => {
-    if (next.length > 1 || (next.length > 0 && streams.length === 0 && participants.length > 1)) gridView = true
+    // Opening the overview is safe: unpublished/unselected cards do not have
+    // a media track attached, so they consume neither video decode nor audio.
+    const selected = selectedStreamId ? next.find((stream) => stream.id === selectedStreamId) : undefined
+    if ((next.length > 1 && (!selected || selected.local)) || (next.some((stream) => !stream.local) && streams.length === 0)) gridView = true
     streams = next
     for (const id of streamVolumes.keys()) if (!next.some((stream) => stream.id === id)) streamVolumes.delete(id)
     if (selectedStreamId && !streams.some((stream) => stream.id === selectedStreamId)) selectedStreamId = null
-    if (!selectedStreamId) selectBestStream()
+    if (!selectedStreamId && next.some((stream) => stream.local)) selectBestStream()
     renderChrome()
   },
   onTelemetry: (next) => {
@@ -233,11 +237,25 @@ function bind(): void {
     if (streams.length && participants.length > 1) { gridView = true; renderChrome() }
   })
   focusedStreamVolumeInput.addEventListener('input', syncFocusedStreamVolume)
-  focusedStreamMuteButton.addEventListener('click', () => {
+  // These overlays sit above a clickable video. Stop the whole pointer/click
+  // sequence here so no control interaction can also switch to the grid.
+  for (const eventName of ['pointerdown', 'click']) focusedStreamVolume.addEventListener(eventName, (event) => event.stopPropagation())
+  focusedStreamMuteButton.addEventListener('click', (event) => {
+    event.stopPropagation()
     const stream = streams.find((candidate) => candidate.id === selectedStreamId)
     if (!stream || stream.local) return
     setStreamMuted(stream.id, !stream.muted)
     revealScreenControls()
+  })
+  focusedStreamHideButton.addEventListener('pointerdown', (event) => event.stopPropagation())
+  focusedStreamHideButton.addEventListener('click', (event) => {
+    event.stopPropagation()
+    const stream = streams.find((candidate) => candidate.id === selectedStreamId)
+    if (!stream || stream.local) return
+    selectedStreamId = null
+    gridView = true
+    hideStream(stream.id)
+    renderChrome()
   })
   stopButton.addEventListener('click', () => void onStop())
   leaveButton.addEventListener('click', () => void onLeave())
@@ -398,7 +416,18 @@ async function connect(roomName: string, role: Role): Promise<boolean> {
   const issued = await window.sharescreen.createToken({ role, displayName: saved.displayName, room: roomName })
   if (!issued.ok) { showNote(picker.open ? pickerNote : stageNote, issued.error, 'error'); return false }
   try {
-    await joinRoom({ url: issued.value.url, token: issued.value.token, subscribe: true, media: { video, audioRack }, hooks })
+    await joinRoom({
+      url: issued.value.url,
+      token: issued.value.token,
+      subscribe: false,
+      media: { video, audioRack },
+      hooks,
+      roster: async () => {
+        const roster = await window.sharescreen.listRoomParticipants({ name: roomName })
+        if (!roster.ok) throw new Error(roster.error)
+        return roster.value
+      },
+    })
   } catch (error) {
     resetRoomState(); showNote(picker.open ? pickerNote : stageNote, messageOf(error), 'error'); renderChrome(); return false
   }
@@ -531,7 +560,7 @@ function resetRoomState(): void {
 }
 
 function selectBestStream(): void {
-  const candidate = hideLocalPreview ? streams.find((stream) => !stream.local) : streams.find((stream) => stream.local) ?? streams[0]
+  const candidate = hideLocalPreview ? undefined : streams.find((stream) => stream.local)
   selectedStreamId = candidate?.id ?? null; selectStream(selectedStreamId)
 }
 
@@ -550,7 +579,7 @@ function renderChrome(): void {
   hideMyScreenButton.innerHTML = icon(hideLocalPreview ? 'eye-off' : 'eye')
   hideMyScreenButton.setAttribute('aria-pressed', String(hideLocalPreview))
   stopButton.hidden = !localStream; leaveButton.hidden = !inRoom
-  const hasVideo = visibleStreams.length > 0
+  const hasVideo = visibleStreams.some((stream) => stream.local || stream.subscribed)
   syncScreenControlsVisibility(hasVideo)
   fullscreenButton.hidden = !hasVideo
   popOutButton.hidden = !hasVideo || gridView
@@ -585,8 +614,9 @@ function renderChrome(): void {
 
 function renderFocusedStreamVolume(useGrid: boolean): void {
   const stream = streams.find((candidate) => candidate.id === selectedStreamId)
-  const visible = !useGrid && stream !== undefined && !stream.local
+  const visible = !useGrid && stream !== undefined && !stream.local && stream.subscribed
   focusedStreamVolume.hidden = !visible
+  focusedStreamHideButton.hidden = !visible
   if (!stream) return
   const value = Math.round((streamVolumes.get(stream.id) ?? 1) * 100)
   focusedStreamVolumeInput.value = String(value)
@@ -597,12 +627,13 @@ function renderFocusedStreamVolume(useGrid: boolean): void {
   focusedStreamMuteButton.innerHTML = icon(stream.muted ? 'volume-off' : 'volume')
   labelButton(focusedStreamMuteButton, `${stream.muted ? 'Unmute' : 'Mute'} ${stream.participantName}`)
   focusedStreamMuteButton.setAttribute('aria-pressed', String(stream.muted))
+  labelButton(focusedStreamHideButton, `Hide ${stream.participantName}'s screen`)
 }
 
 function syncFocusedStreamVolume(): void {
   const stream = streams.find((candidate) => candidate.id === selectedStreamId)
   if (!stream || stream.local) return
-  const value = Math.max(0, Math.min(100, Number(focusedStreamVolumeInput.value) || 0)) / 100
+  const value = Math.max(0, Math.min(200, Number(focusedStreamVolumeInput.value) || 0)) / 100
   streamVolumes.set(stream.id, value)
   focusedStreamVolumeValue.value = `${Math.round(value * 100)}%`
   focusedStreamVolumeValue.textContent = focusedStreamVolumeValue.value
@@ -612,7 +643,7 @@ function syncFocusedStreamVolume(): void {
 
 function renderGrid(active: boolean): void {
   const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
-  const signature = active ? JSON.stringify({ participants, streams: visibleStreams.map((stream) => [stream.id, stream.muted, streamVolumes.get(stream.id) ?? 1]) }) : ''
+  const signature = active ? JSON.stringify({ participants, streams: visibleStreams.map((stream) => [stream.id, stream.subscribed, stream.muted, streamVolumes.get(stream.id) ?? 1]) }) : ''
   if (signature === lastGridSignature) return
   lastGridSignature = signature
   if (!active) {
@@ -622,15 +653,25 @@ function renderGrid(active: boolean): void {
   }
   const targets = new Map<string, HTMLVideoElement>()
   const tiles = document.createDocumentFragment()
-  for (const participant of participants) {
+  const orderedParticipants = [...participants].sort((left, right) => {
+    const rank = (participant: RoomParticipant): number => {
+      const stream = visibleStreams.find((candidate) => candidate.participantId === participant.id)
+      return stream?.subscribed ? 0 : stream ? 1 : 2
+    }
+    const group = rank(left) - rank(right)
+    if (group !== 0) return group
+    const name = left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
+    return name || left.id.localeCompare(right.id)
+  })
+  for (const participant of orderedParticipants) {
     const stream = visibleStreams.find((candidate) => candidate.participantId === participant.id)
     const tile = Object.assign(document.createElement('article'), { className: 'grid-tile' })
-    if (stream) {
+    if (stream && stream.subscribed) {
       tile.classList.add('is-stream')
       tile.tabIndex = 0
       tile.setAttribute('role', 'button')
       tile.setAttribute('aria-label', `Focus ${stream.participantName}'s screen`)
-      const focus = () => { gridView = false; hideLocalPreview = false; selectedStreamId = stream.id; selectStream(stream.id); renderChrome() }
+      const focus = () => { gridView = false; selectedStreamId = stream.id; watchStream(stream.id); selectStream(stream.id); renderChrome() }
       tile.addEventListener('click', focus)
       tile.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); focus() } })
       const tileVideo = document.createElement('video')
@@ -646,12 +687,14 @@ function renderGrid(active: boolean): void {
         labelButton(mute, `${stream.muted ? 'Unmute' : 'Mute'} ${stream.participantName}`)
         mute.setAttribute('aria-pressed', String(stream.muted))
         mute.addEventListener('click', (event) => { event.stopPropagation(); setStreamMuted(stream.id, !stream.muted) })
-        const volume = Object.assign(document.createElement('input'), { type: 'range', className: 'grid-tile-volume', min: '0', max: '100', value: String(Math.round((streamVolumes.get(stream.id) ?? 1) * 100)) })
+        audioControls.addEventListener('pointerdown', (event) => event.stopPropagation())
+        audioControls.addEventListener('click', (event) => event.stopPropagation())
+        const volume = Object.assign(document.createElement('input'), { type: 'range', className: 'grid-tile-volume', min: '0', max: '200', value: String(Math.round((streamVolumes.get(stream.id) ?? 1) * 100)) })
         volume.setAttribute('aria-label', `Volume for ${stream.participantName}`)
         volume.title = `Volume for ${stream.participantName}: ${volume.value}%`
         const updateVolume = (event: Event) => {
           event.stopPropagation()
-          const value = Math.max(0, Math.min(100, Number((event.currentTarget as HTMLInputElement).value) || 0)) / 100
+          const value = Math.max(0, Math.min(200, Number((event.currentTarget as HTMLInputElement).value) || 0)) / 100
           streamVolumes.set(stream.id, value)
           const input = event.currentTarget as HTMLInputElement
           input.title = `Volume for ${stream.participantName}: ${Math.round(value * 100)}%`
@@ -660,8 +703,25 @@ function renderGrid(active: boolean): void {
         volume.addEventListener('input', updateVolume)
         volume.addEventListener('click', (event) => event.stopPropagation())
         audioControls.append(volume, mute)
-        tile.append(audioControls)
+        const hide = Object.assign(document.createElement('button'), { type: 'button', className: 'grid-tile-hide' })
+        hide.innerHTML = icon('eye-off')
+        labelButton(hide, `Hide ${stream.participantName}'s screen`)
+        hide.addEventListener('pointerdown', (event) => event.stopPropagation())
+        hide.addEventListener('click', (event) => { event.stopPropagation(); hideStream(stream.id); renderChrome() })
+        tile.append(audioControls, hide)
       }
+    } else if (stream) {
+      tile.classList.add('is-stream', 'is-available')
+      const watch = () => { selectedStreamId = stream.id; watchStream(stream.id); selectStream(stream.id); renderChrome() }
+      tile.addEventListener('click', watch)
+      const monitor = Object.assign(document.createElement('span'), { className: 'stream-available-monitor' })
+      monitor.innerHTML = icon('monitor')
+      // This button fills the card; the visible label is only its call to
+      // action, while any click elsewhere on the card starts watching too.
+      const startWatching = Object.assign(document.createElement('button'), { type: 'button', className: 'start-watching' })
+      labelButton(startWatching, `Click to watch ${stream.participantName}'s screen`)
+      startWatching.append(Object.assign(document.createElement('span'), { className: 'start-watching-label', textContent: 'Click to watch' }))
+      tile.append(monitor, startWatching)
     } else {
       tile.classList.add('is-participant')
       tile.style.setProperty('--avatar-hue', String(avatarHue(participant.name)))
@@ -725,7 +785,7 @@ function syncAudioControls(): void {
 }
 
 function syncAudioVolume(): void {
-  const value = Math.max(0, Math.min(100, Number(audioVolumeInput.value) || 0))
+  const value = Math.max(0, Math.min(200, Number(audioVolumeInput.value) || 0))
   audioVolumeInput.value = String(value)
   audioVolumeValue.value = `${value}%`
   audioVolumeValue.textContent = `${value}%`

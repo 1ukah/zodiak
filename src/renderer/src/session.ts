@@ -25,12 +25,19 @@ export interface RoomParticipant {
   local: boolean
 }
 
+export interface RosterParticipant {
+  id: string
+  name: string
+}
+
 export interface ScreenStream {
   id: string
   participantId: string
   participantName: string
   local: boolean
   muted: boolean
+  /** A remote stream is only decoded after the viewer explicitly watches it. */
+  subscribed: boolean
 }
 
 export interface StreamMetric {
@@ -69,7 +76,8 @@ export interface SessionHooks {
 }
 
 interface StreamRecord extends ScreenStream {
-  track: LocalVideoTrack | RemoteVideoTrack
+  track?: LocalVideoTrack | RemoteVideoTrack
+  publication?: RemoteTrackPublication
 }
 
 let room: Room | null = null
@@ -81,14 +89,20 @@ let selectedTrack: LocalVideoTrack | RemoteVideoTrack | null = null
 let stageVideoVisible = true
 let streams = new Map<string, StreamRecord>()
 let mutedParticipants = new Set<string>()
+let hiddenParticipants = new Set<string>()
 let remoteAudio = new Map<string, HTMLAudioElement>()
 let remoteAudioTracks = new Map<string, RemoteTrack>()
+let remoteAudioGains = new Map<string, GainNode>()
+let audioContext: AudioContext | null = null
 let remoteAudioVolume = 1
 let remoteStreamVolumes = new Map<string, number>()
 let remoteAudioOutputDeviceId = ''
 let gridTargets = new Map<string, HTMLVideoElement>()
 let gridTracks = new Map<string, LocalVideoTrack | RemoteVideoTrack>()
 let statsTimer: ReturnType<typeof window.setInterval> | null = null
+let rosterTimer: ReturnType<typeof window.setInterval> | null = null
+let rosterProvider: (() => Promise<RosterParticipant[]>) | null = null
+let rosterRequestInFlight = false
 let lastStats = new Map<string, CounterSample>()
 let telemetryInFlight = false
 let localScreenTargetBitrate: number | undefined
@@ -110,10 +124,12 @@ export async function joinRoom(args: {
   subscribe: boolean
   media: MediaTargets
   hooks: SessionHooks
+  roster?: () => Promise<RosterParticipant[]>
 }): Promise<void> {
   await leaveRoom()
   targets = args.media
   hooks = args.hooks
+  rosterProvider = args.roster ?? null
   const next = new Room({
     // Let WebRTC and LiveKit select an efficient layer for each tile. This is
     // essential when multiple streams are visible and avoids starving the
@@ -134,6 +150,8 @@ export async function joinRoom(args: {
   hooks.onViewers(next.remoteParticipants.size)
   refreshParticipants(next)
   refreshStreams(next)
+  void refreshRoster(next)
+  startRosterSync(next)
   startTelemetry(next)
 }
 
@@ -209,6 +227,40 @@ export function selectStream(id: string | null): void {
   attachSelectedVideo()
 }
 
+/** Starts receiving one screen (and its paired screen audio) on demand. */
+export function watchStream(id: string): void {
+  const record = streams.get(id)
+  if (!record) return
+  selectedStreamId = id
+  if (!record.local && record.publication) {
+    hiddenParticipants.delete(record.participantId)
+    record.publication.setSubscribed(true)
+    setParticipantScreenAudioSubscribed(record.participantId, true)
+  }
+  attachSelectedVideo()
+}
+
+/** Unsubscribes a remote screen completely, stopping its network, decode, and audio work. */
+export function hideStream(id: string): void {
+  const record = streams.get(id)
+  if (!record || record.local || !record.publication) return
+  hiddenParticipants.add(record.participantId)
+  record.publication.setSubscribed(false)
+  setParticipantScreenAudioSubscribed(record.participantId, false)
+  record.track?.detach()
+  const gridTarget = gridTargets.get(id)
+  if (gridTarget) record.track?.detach(gridTarget)
+  gridTracks.delete(id)
+  removeRemoteAudio(record.participantId)
+  // Do not wait for the SFU's unsubscribe acknowledgement before dropping the
+  // DOM/media references. This makes hiding immediately stop local rendering.
+  record.track = undefined
+  record.subscribed = false
+  if (selectedStreamId === id) selectedStreamId = null
+  attachSelectedVideo()
+  emitStreams()
+}
+
 /** Stops decoding the hidden single-stage preview while the grid is active. */
 export function setStageVideoVisible(visible: boolean): void {
   if (stageVideoVisible === visible) return
@@ -241,16 +293,16 @@ export function setStreamMuted(id: string, muted: boolean): void {
 export function setStreamVolume(id: string, volume: number): void {
   const record = streams.get(id)
   if (!record || record.local) return
-  const next = Math.max(0, Math.min(1, volume))
+  const next = Math.max(0, Math.min(2, volume))
   remoteStreamVolumes.set(record.participantId, next)
   const element = remoteAudio.get(record.participantId)
-  if (element) element.volume = remoteAudioVolume * next
+  if (element) applyAudioVolume(record.participantId, element)
 }
 
 /** Applies a single playback level to every remote screen-audio track. */
 export function setRemoteAudioVolume(volume: number): void {
-  remoteAudioVolume = Math.max(0, Math.min(1, volume))
-  remoteAudio.forEach((element, identity) => { element.volume = remoteAudioVolume * (remoteStreamVolumes.get(identity) ?? 1) })
+  remoteAudioVolume = Math.max(0, Math.min(2, volume))
+  remoteAudio.forEach((element, identity) => applyAudioVolume(identity, element))
 }
 
 /** Routes remote stream audio to a Windows output device when Chromium supports it. */
@@ -291,24 +343,21 @@ function requireRoom(): Room {
 
 function bindRoom(next: Room): void {
   next.on(RoomEvent.ConnectionStateChanged, (state) => {
-    if (room === next) hooks?.onConnection(toPresence(state))
+    if (room !== next) return
+    hooks?.onConnection(toPresence(state))
+    if (state === ConnectionState.Connected) refreshRoomState(next)
   })
   next.on(RoomEvent.ParticipantConnected, () => {
-    if (room !== next) return
-    hooks?.onViewers(next.remoteParticipants.size)
-    refreshParticipants(next)
-    refreshStreams(next)
+    if (room === next) refreshRoomState(next)
   })
   next.on(RoomEvent.ParticipantDisconnected, () => {
-    if (room !== next) return
-    hooks?.onViewers(next.remoteParticipants.size)
-    refreshParticipants(next)
-    refreshStreams(next)
+    if (room === next) refreshRoomState(next)
   })
   next.on(RoomEvent.ParticipantNameChanged, () => {
-    if (room !== next) return
-    refreshParticipants(next)
-    refreshStreams(next)
+    if (room === next) refreshRoomState(next)
+  })
+  next.on(RoomEvent.Reconnected, () => {
+    if (room === next) refreshRoomState(next)
   })
   next.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
     if (room !== next) return
@@ -319,6 +368,12 @@ function bindRoom(next: Room): void {
     if (room !== next) return
     track.detach()
     refreshStreams(next)
+  })
+  next.on(RoomEvent.TrackPublished, () => {
+    if (room === next) refreshStreams(next)
+  })
+  next.on(RoomEvent.TrackUnpublished, () => {
+    if (room === next) refreshStreams(next)
   })
   next.on(RoomEvent.LocalTrackPublished, () => {
     if (room === next) refreshStreams(next)
@@ -339,6 +394,13 @@ function bindRoom(next: Room): void {
   })
 }
 
+function refreshRoomState(current: Room): void {
+  hooks?.onViewers(current.remoteParticipants.size)
+  refreshParticipants(current)
+  refreshStreams(current)
+  void refreshRoster(current)
+}
+
 function refreshStreams(current: Room): void {
   const next = new Map<string, StreamRecord>()
   addLocalStream(
@@ -353,10 +415,13 @@ function refreshStreams(current: Room): void {
   streams = next
   syncRemoteAudio(current)
   if (selectedStreamId && !streams.has(selectedStreamId)) selectedStreamId = null
-  if (!selectedStreamId) selectedStreamId = streams.values().next().value?.id ?? null
   attachSelectedVideo()
   syncGridVideos()
-  hooks?.onStreams([...streams.values()].map(({ track: _track, ...stream }) => stream))
+  emitStreams()
+}
+
+function emitStreams(): void {
+  hooks?.onStreams([...streams.values()].map(({ track: _track, publication: _publication, ...stream }) => stream))
 }
 
 function refreshParticipants(current: Room): void {
@@ -369,6 +434,47 @@ function refreshParticipants(current: Room): void {
     next.push({ id: participant.identity, name: participant.name || participant.identity, local: false })
   })
   hooks?.onParticipants(next)
+}
+
+/**
+ * LiveKit's participant events update the UI immediately. This server roster
+ * check is a reconciliation path for reconnects or missed signaling events.
+ */
+async function refreshRoster(current: Room): Promise<void> {
+  if (!rosterProvider || rosterRequestInFlight || room !== current) return
+  rosterRequestInFlight = true
+  try {
+    const roster = await rosterProvider()
+    if (room !== current) return
+    const local = {
+      id: current.localParticipant.identity,
+      name: displayNameForLocal(current),
+      local: true,
+    }
+    const remotes = roster
+      .filter((participant) => participant.id !== local.id)
+      .map((participant) => ({ ...participant, local: false }))
+    hooks?.onViewers(remotes.length)
+    hooks?.onParticipants([local, ...remotes])
+  } catch {
+    // The SDK's live roster remains displayed while the server is unavailable.
+  } finally {
+    rosterRequestInFlight = false
+  }
+}
+
+function startRosterSync(current: Room): void {
+  if (rosterTimer !== null) window.clearInterval(rosterTimer)
+  rosterTimer = null
+  if (!rosterProvider) return
+  rosterTimer = window.setInterval(() => void refreshRoster(current), 2_000)
+}
+
+function stopRosterSync(): void {
+  if (rosterTimer !== null) window.clearInterval(rosterTimer)
+  rosterTimer = null
+  rosterRequestInFlight = false
+  rosterProvider = null
 }
 
 function displayNameForLocal(current: Room): string {
@@ -384,12 +490,12 @@ function addLocalStream(
   const track = publication?.track
   if (!track || track.kind !== Track.Kind.Video || track.source !== Track.Source.ScreenShare) return
   const id = `local:${publication.trackSid ?? 'screen'}`
-  destination.set(id, { id, participantId: identity, participantName: name || 'You', local: true, muted: false, track: track as LocalVideoTrack })
+  destination.set(id, { id, participantId: identity, participantName: name || 'You', local: true, muted: false, subscribed: true, track: track as LocalVideoTrack })
 }
 
 function addRemoteStream(destination: Map<string, StreamRecord>, publication: RemoteTrackPublication, participant: RemoteParticipant): void {
   const track = publication.track
-  if (!track || !isScreenVideo(track)) return
+  if (publication.kind !== Track.Kind.Video || publication.source !== Track.Source.ScreenShare) return
   const id = `remote:${participant.identity}:${publication.trackSid}`
   destination.set(id, {
     id,
@@ -397,7 +503,9 @@ function addRemoteStream(destination: Map<string, StreamRecord>, publication: Re
     participantName: participant.name || participant.identity,
     local: false,
     muted: mutedParticipants.has(participant.identity),
-    track,
+    subscribed: publication.isSubscribed && !hiddenParticipants.has(participant.identity),
+    track: track && isScreenVideo(track) ? track : undefined,
+    publication,
   })
 }
 
@@ -412,7 +520,7 @@ function attachSelectedVideo(): void {
     return
   }
   const selected = selectedStreamId ? streams.get(selectedStreamId) : undefined
-  if (!selected) {
+  if (!selected?.track) {
     media.video.pause()
     media.video.srcObject = null
     return
@@ -432,7 +540,7 @@ function syncGridVideos(): void {
   })
   gridTargets.forEach((target, id) => {
     const record = streams.get(id)
-    if (!record || gridTracks.has(id)) return
+    if (!record?.track || gridTracks.has(id)) return
     target.muted = record.local
     record.track.attach(target)
     void target.play().catch(() => undefined)
@@ -445,14 +553,12 @@ function syncRemoteAudio(current: Room): void {
   current.remoteParticipants.forEach((participant) => {
     participant.trackPublications.forEach((publication) => {
       const track = publication.track
-      if (track && isScreenAudio(track)) wanted.set(participant.identity, { track, participant })
+      if (track && isScreenAudio(track) && !hiddenParticipants.has(participant.identity)) wanted.set(participant.identity, { track, participant })
     })
   })
   remoteAudio.forEach((element, identity) => {
     if (wanted.has(identity)) return
-    element.remove()
-    remoteAudio.delete(identity)
-    remoteAudioTracks.delete(identity)
+    removeRemoteAudio(identity)
   })
   wanted.forEach(({ track, participant }) => void attachAudio(track, participant))
 }
@@ -464,10 +570,11 @@ async function attachAudio(track: RemoteTrack, participant: RemoteParticipant): 
   if (!element) {
     element = document.createElement('audio')
     element.autoplay = true
-    element.volume = remoteAudioVolume * (remoteStreamVolumes.get(participant.identity) ?? 1)
+    element.volume = 1
     media.audioRack.append(element)
     remoteAudio.set(participant.identity, element)
   }
+  applyAudioVolume(participant.identity, element)
   element.muted = mutedParticipants.has(participant.identity)
   if (remoteAudioTracks.get(participant.identity) !== track) {
     const previous = remoteAudioTracks.get(participant.identity)
@@ -481,6 +588,44 @@ async function attachAudio(track: RemoteTrack, participant: RemoteParticipant): 
     hooks?.onAudioBlocked(false)
   } catch {
     hooks?.onAudioBlocked(true)
+  }
+}
+
+function setParticipantScreenAudioSubscribed(identity: string, subscribed: boolean): void {
+  const current = room
+  const participant = current?.remoteParticipants.get(identity)
+  participant?.trackPublications.forEach((publication) => {
+    if (publication.source === Track.Source.ScreenShareAudio) publication.setSubscribed(subscribed)
+  })
+}
+
+function removeRemoteAudio(identity: string): void {
+  remoteAudioGains.get(identity)?.disconnect()
+  remoteAudioGains.delete(identity)
+  remoteAudio.get(identity)?.remove()
+  remoteAudio.delete(identity)
+  remoteAudioTracks.delete(identity)
+}
+
+function applyAudioVolume(identity: string, element: HTMLAudioElement): void {
+  const volume = Math.min(2, remoteAudioVolume * (remoteStreamVolumes.get(identity) ?? 1))
+  const gain = getAudioGain(identity, element)
+  if (gain) gain.gain.value = volume
+  else element.volume = Math.min(1, volume)
+}
+
+function getAudioGain(identity: string, element: HTMLAudioElement): GainNode | null {
+  const existing = remoteAudioGains.get(identity)
+  if (existing) return existing
+  try {
+    audioContext ??= new AudioContext()
+    const gain = audioContext.createGain()
+    audioContext.createMediaElementSource(element).connect(gain).connect(audioContext.destination)
+    remoteAudioGains.set(identity, gain)
+    void audioContext.resume().catch(() => undefined)
+    return gain
+  } catch {
+    return null
   }
 }
 
@@ -499,6 +644,7 @@ function isScreenAudio(track: RemoteTrack): boolean {
 }
 
 function clearMedia(): void {
+  stopRosterSync()
   stopTelemetry()
   if (selectedTrack && targets) selectedTrack.detach(targets.video)
   selectedTrack = null
@@ -512,9 +658,12 @@ function clearMedia(): void {
   streams.clear()
   selectedStreamId = null
   mutedParticipants.clear()
+  hiddenParticipants.clear()
   remoteAudio.forEach((element) => element.remove())
   remoteAudio.clear()
   remoteAudioTracks.clear()
+  remoteAudioGains.forEach((gain) => gain.disconnect())
+  remoteAudioGains.clear()
   remoteStreamVolumes.clear()
   localScreenTargetBitrate = undefined
   localParticipantName = undefined

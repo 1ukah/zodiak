@@ -6,7 +6,7 @@ import { startSystemAudio, stopSystemAudio } from './system-audio'
 import { loadConfig, saveConfig } from './config'
 import { isRecord } from './parse'
 import { settle } from './result'
-import { createLiveRoom, deleteLiveRoom, listLiveRooms } from './rooms'
+import { createLiveRoom, deleteLiveRoom, listLiveRoomParticipants, listLiveRooms } from './rooms'
 import { createParticipantToken } from './tokens'
 
 app.setName('zodiak')
@@ -220,6 +220,7 @@ function registerIpc(): void {
   ipcMain.handle(channels.saveConfig, (_event, payload: unknown) => settle(() => saveConfig(payload)))
   ipcMain.handle(channels.createToken, (_event, payload: unknown) => settle(() => createParticipantToken(payload)))
   ipcMain.handle(channels.listRooms, () => settle(() => listLiveRooms()))
+  ipcMain.handle(channels.listRoomParticipants, (_event, payload: unknown) => settle(() => listLiveRoomParticipants(payload)))
   ipcMain.handle(channels.createRoom, (_event, payload: unknown) => settle(() => createLiveRoom(payload)))
   ipcMain.handle(channels.deleteRoom, (_event, payload: unknown) => settle(() => deleteLiveRoom(payload)))
   ipcMain.handle(channels.listSources, () => settle(() => listSources()))
