@@ -14,6 +14,12 @@ export interface RoomSummary {
   sharing: boolean
 }
 
+/** Authoritative participant identity and display name from the LiveKit server. */
+export interface RoomParticipantInfo {
+  id: string
+  name: string
+}
+
 export interface CreateRoomRequest {
   name: string
   displayName: string
@@ -96,6 +102,7 @@ export const channels = {
   saveConfig: 'config:save',
   createToken: 'token:create',
   listRooms: 'rooms:list',
+  listRoomParticipants: 'rooms:list-participants',
   createRoom: 'rooms:create',
   deleteRoom: 'rooms:delete',
   listSources: 'sources:list',
@@ -114,6 +121,7 @@ export interface SharescreenApi {
   saveConfig: (config: AppConfig) => Promise<ActionResult<AppConfig>>
   createToken: (request: TokenRequest) => Promise<ActionResult<TokenResponse>>
   listRooms: () => Promise<ActionResult<RoomSummary[]>>
+  listRoomParticipants: (request: RoomNameRequest) => Promise<ActionResult<RoomParticipantInfo[]>>
   createRoom: (request: CreateRoomRequest) => Promise<ActionResult<RoomSummary>>
   deleteRoom: (request: RoomNameRequest) => Promise<ActionResult<true>>
   listSources: () => Promise<ActionResult<DesktopSourceInfo[]>>

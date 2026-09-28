@@ -1,5 +1,5 @@
 import { RoomServiceClient, type ParticipantInfo } from 'livekit-server-sdk'
-import type { CreateRoomRequest, RoomSummary } from '../shared/types'
+import type { CreateRoomRequest, RoomParticipantInfo, RoomSummary } from '../shared/types'
 import { requireDisplayName, requireRoom } from './config'
 import { connectServer, explainLiveKitError, isMissingRoom, withTimeout } from './livekit'
 import { isRecord } from './parse'
@@ -78,6 +78,21 @@ export async function deleteLiveRoom(value: unknown): Promise<true> {
     return true
   } catch (error) {
     if (isMissingRoom(error)) return true
+    throw explainLiveKitError(error, server.signalUrl)
+  }
+}
+
+/** Reads the server's current room roster, independent of client-side events. */
+export async function listLiveRoomParticipants(value: unknown): Promise<RoomParticipantInfo[]> {
+  const room = parseRoomName(value)
+  const server = await connectServer()
+  try {
+    const participants = await listRoomParticipants(server.client, server.signalUrl, room)
+    return participants.map((participant) => ({
+      id: participant.identity,
+      name: participant.name || participant.identity,
+    }))
+  } catch (error) {
     throw explainLiveKitError(error, server.signalUrl)
   }
 }

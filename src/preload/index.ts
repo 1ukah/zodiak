@@ -7,6 +7,7 @@ const api = {
   saveConfig: (config) => ipcRenderer.invoke(channels.saveConfig, config),
   createToken: (request) => ipcRenderer.invoke(channels.createToken, request),
   listRooms: () => ipcRenderer.invoke(channels.listRooms),
+  listRoomParticipants: (request) => ipcRenderer.invoke(channels.listRoomParticipants, request),
   createRoom: (request) => ipcRenderer.invoke(channels.createRoom, request),
   deleteRoom: (request) => ipcRenderer.invoke(channels.deleteRoom, request),
   listSources: () => ipcRenderer.invoke(channels.listSources),

@@ -4,6 +4,7 @@ let streams = []
 export const state = window.uiTest = {
   hooks: null, volume: 1, streamVolume: 1, device: 'default', selected: null, targets: [],
   emitStreams(value) { streams = value; hooks.onStreams(value) },
+  emitParticipants(value) { hooks.onParticipants(value) },
   emitTelemetry(value) { hooks.onTelemetry(value) },
 }
 export async function joinRoom(options) {
@@ -20,6 +21,8 @@ export async function updateDisplayName(name) {
   state.emitStreams(streams.map(stream => stream.local ? { ...stream, participantName: name } : stream))
 }
 export function selectStream(id) { state.selected = id }
+export function watchStream(id) { state.selected = id; state.emitStreams(streams.map(s => s.id === id ? { ...s, subscribed: true } : s)) }
+export function hideStream(id) { state.emitStreams(streams.map(s => s.id === id ? { ...s, subscribed: false } : s)) }
 export function setGridVideos(targets) { state.targets = [...targets.keys()] }
 export function setRemoteAudioOutputDevice(id) { state.device = id; return Promise.resolve() }
 export function setRemoteAudioVolume(volume) { state.volume = volume }
