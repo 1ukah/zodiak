@@ -960,19 +960,70 @@ body.in-room .welcome-mark {
   position: absolute;
   right: 26px;
   bottom: 24px;
-  display: flex;
-  gap: 6px;
-  max-width: calc(100% - 52px);
-  pointer-events: none;
-  opacity: .65;
+  display: grid;
+  grid-template-columns: repeat(2,minmax(168px,1fr));
+  gap: 8px;
+  width: min(440px,calc(100% - 52px));
+  pointer-events: auto;
+  opacity: .96;
+  transition: opacity .18s ease;
 }
-#stream-metrics span {
-  border: 1px solid #ffffff12;
-  border-radius: 5px;
-  padding: 4px 7px;
-  background: #111216dd;
-  color: #babac9;
-  font: 9px/1.4 Consolas,monospace;
+.metric-card {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #ffffff16;
+  border-radius: 8px;
+  background: #111216ed;
+}
+.metric-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.metric-card strong {
+  color: var(--text);
+  font-size: 11px;
+}
+.metric-card header span {
+  color: var(--muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .7px;
+}
+.metric-card dl {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 7px 12px;
+  margin: 0;
+}
+.metric-card dl div {
+  min-width: 0;
+}
+.metric-card dt {
+  color: #858797;
+  font-size: 9px;
+  line-height: 1.2;
+}
+.metric-card dd {
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: #dedee8;
+  font: 10px/1.2 Consolas,monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media(max-width:720px) {
+  #stream-metrics {
+    grid-template-columns: minmax(168px,1fr);
+    width: min(224px,calc(100% - 52px));
+  }
+}
+/* A focused stream uses the right edge for its volume control. */
+#stream-grid[hidden] ~ #stream-metrics {
+  right: auto;
+  left: 26px;
 }
 #stage-note {
   position: absolute;
@@ -1260,6 +1311,7 @@ details summary span {
   top: 20px;
   z-index: 2;
   background: #25232fe6;
+  transition: opacity .18s ease;
 }
 .focused-stream-volume {
   position: absolute;
@@ -1267,31 +1319,78 @@ details summary span {
   bottom: 20px;
   z-index: 2;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  width: min(250px,calc(100% - 48px));
-  padding: 9px 12px;
-  border: 1px solid #3a3947;
-  border-radius: 9px;
-  background: #191a20e6;
+  justify-content: flex-end;
+  gap: 0;
+  width: 34px;
+  height: 34px;
+  padding: 2px;
+  background: #191a20;
+  border-radius: 8px;
   color: var(--text);
-  backdrop-filter: blur(8px);
-}
-.focused-stream-volume .icon {
-  width: 18px;
-  height: 18px;
-  color: var(--accent);
+  overflow: hidden;
+  transition: height .18s ease,padding .18s ease,gap .18s ease,opacity .18s ease;
 }
 .focused-stream-volume input {
   min-width: 0;
-  flex: 1;
+  min-height: 0;
+  flex: 1 1 auto;
+  width: 18px;
+  writing-mode: vertical-lr;
+  direction: rtl;
   accent-color: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease;
 }
 .focused-stream-volume output {
-  min-width: 36px;
+  height: 0;
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
   font-size: 12px;
+  line-height: 0;
+  opacity: 0;
   text-align: right;
+  transition: opacity .12s ease;
+}
+.focused-stream-volume:hover,
+.focused-stream-volume:has(input:focus) {
+  gap: 8px;
+  height: min(224px,calc(100% - 48px));
+  padding: 12px 2px 4px;
+}
+.focused-stream-volume:hover input,
+.focused-stream-volume:has(input:focus) input {
+  opacity: 1;
+  pointer-events: auto;
+}
+.focused-stream-volume:hover output,
+.focused-stream-volume:has(input:focus) output {
+  height: auto;
+  line-height: normal;
+  opacity: 1;
+}
+.focused-stream-mute {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: #111217dc;
+  color: #d4d3df;
+}
+.focused-stream-mute:hover,
+.focused-stream-mute[aria-pressed=true] {
+  background: #2a273c;
+  color: var(--accent);
+}
+.focused-stream-mute .icon {
+  width: 16px;
+  height: 16px;
 }
 body.theater #shell {
   grid-template-columns: minmax(0,1fr);
@@ -1304,6 +1403,15 @@ body.theater #exit-focus {
 }
 body.theater #stage-video {
   padding: 0;
+}
+/* Floating controls should leave an unobstructed view while the pointer rests. */
+/* The stream audio controls follow the same inactivity behavior as the other overlays. */
+#stage-wrap.screen-controls-idle #exit-focus,
+#stage-wrap.screen-controls-idle .focused-stream-volume,
+#stage-wrap.screen-controls-idle #stream-metrics,
+#stage-wrap.screen-controls-idle .grid-stream-audio-controls {
+  opacity: 0;
+  pointer-events: none;
 }
 @media(max-width:1150px) {
   #shell {
@@ -1807,10 +1915,27 @@ body.in-room #shell {
   border-radius: 50%;
   font-size: 27px;
 }
-.grid-tile-mute {
+.grid-stream-audio-controls {
   position: absolute;
-  top: 10px;
   right: 10px;
+  bottom: 10px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+  width: 36px;
+  height: 36px;
+  padding: 2px;
+  background: #191a20;
+  border-radius: 8px;
+  overflow: hidden;
+  opacity: .72;
+  transition: height .18s ease,padding .18s ease,gap .18s ease,opacity .18s ease;
+}
+.grid-tile-mute {
+  position: static;
   width: 32px;
   height: 32px;
   padding: 0;
@@ -1829,17 +1954,31 @@ body.in-room #shell {
   height: 16px;
 }
 .grid-tile-volume {
-  position: absolute;
-  top: 48px;
-  right: 10px;
-  width: 88px;
+  position: static;
+  width: 18px;
+  height: 0;
+  writing-mode: vertical-lr;
+  direction: rtl;
   accent-color: var(--accent);
-  opacity: .72;
-  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: height .18s ease,opacity .12s ease;
 }
-.grid-tile:hover .grid-tile-volume,
-.grid-tile:focus-within .grid-tile-volume {
+.grid-tile:hover .grid-stream-audio-controls,
+.grid-tile:focus-within .grid-stream-audio-controls {
   opacity: 1;
+}
+.grid-stream-audio-controls:hover,
+.grid-stream-audio-controls:has(input:focus) {
+  gap: 4px;
+  height: 140px;
+  padding: 12px 2px 4px;
+}
+.grid-stream-audio-controls:hover .grid-tile-volume,
+.grid-stream-audio-controls:has(input:focus) .grid-tile-volume {
+  height: 88px;
+  opacity: 1;
+  pointer-events: auto;
 }
 body.in-room #stage-video {
   cursor: pointer;

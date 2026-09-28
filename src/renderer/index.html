@@ -26,15 +26,14 @@
           <button id="pop-out" class="icon-button" type="button" title="Pop out" aria-label="Pop out" hidden><span data-icon="popout"></span></button>
           <button id="fullscreen" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button>
           <button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button>
-          <button id="toggle-stats" class="icon-button" type="button" title="Stream statistics" aria-label="Stream statistics" aria-pressed="false" hidden><span data-icon="activity"></span></button>
         </div>
       </header>
       <div id="stage" class="is-idle">
         <video id="stage-video" autoplay playsinline muted></video><div id="stream-grid" aria-label="Live screen shares" hidden></div><div id="participant-grid" aria-label="Participants" hidden></div>
         <div id="waiting" role="status" aria-label="Select a room"><span data-icon="monitor"></span><p id="waiting-message" hidden></p></div>
-        <label id="focused-stream-volume" class="focused-stream-volume" for="focused-stream-volume-input" hidden><span data-icon="volume"></span><input id="focused-stream-volume-input" type="range" min="0" max="100" value="100" aria-label="Selected stream volume" /><output id="focused-stream-volume-value" for="focused-stream-volume-input">100%</output></label>
+        <div id="focused-stream-volume" class="focused-stream-volume" hidden><input id="focused-stream-volume-input" type="range" min="0" max="100" value="100" title="Selected stream volume" aria-label="Selected stream volume" /><output id="focused-stream-volume-value" for="focused-stream-volume-input">100%</output><button id="focused-stream-mute" class="focused-stream-mute" type="button" title="Mute selected stream" aria-label="Mute selected stream"><span data-icon="volume"></span></button></div>
         <button id="exit-focus" class="control-button" title="Exit focus (Esc)" aria-label="Exit focus" hidden><span data-icon="focus"></span></button>
-        <p id="stage-note" class="note" role="alert" hidden></p><div id="stream-metrics" hidden><span id="tx-metrics"></span><span id="rx-metrics"></span></div>
+        <p id="stage-note" class="note" role="alert" hidden></p><aside id="stream-metrics" aria-label="Stream statistics" hidden><section id="host-metrics" class="metric-card" hidden><header><strong>Host</strong><span>Sending</span></header><dl></dl></section><section id="viewer-metrics" class="metric-card" hidden><header><strong>Viewer</strong><span>Receiving</span></header><dl></dl></section></aside>
       </div>
       <footer id="call-controls" hidden>
         <div class="call-actions">
@@ -60,17 +59,18 @@
       <label class="field" for="display-name">Name<input id="display-name" type="text" maxlength="40" autocomplete="nickname" title="Applies when you next join a room" /></label>
       <section class="settings-section" id="audio-controls" aria-label="Audio">
         <div class="audio-output-row"><label class="field" for="audio-output">Output<select id="audio-output"><option value="default">System default</option></select></label><button id="refresh-audio-output" class="control-button" type="button" title="Refresh devices" aria-label="Refresh audio devices"><span data-icon="refresh"></span></button></div>
-        <label class="field audio-volume" for="audio-volume"><span class="volume-heading"><span data-icon="volume"></span><output id="audio-volume-value" for="audio-volume">100%</output></span><input id="audio-volume" type="range" min="0" max="100" value="100" aria-label="Stream volume" /></label><p id="audio-output-note" class="quality-note" role="status" hidden></p>
+        <label class="field audio-volume" for="audio-volume"><span class="volume-heading"><span data-icon="volume"></span><output id="audio-volume-value" for="audio-volume">100%</output></span><input id="audio-volume" type="range" min="0" max="100" value="100" title="Incoming screen-audio volume" aria-label="Stream volume" /></label><p id="audio-output-note" class="quality-note" role="status" hidden></p>
       </section>
+      <label class="check" for="show-stream-statistics"><span>Stream statistics</span><input id="show-stream-statistics" type="checkbox" role="switch" title="Show host and viewer stream statistics" /></label>
       <p id="settings-note" class="note" role="alert" hidden></p><div class="actions"><button id="save-settings" class="primary icon-action" title="Save" aria-label="Save settings"><span data-icon="check"></span></button></div>
     </div>
   </dialog>
   <dialog id="server-dialog" class="dialog server-dialog" aria-label="Server connection">
     <div class="dialog-content">
       <div class="dialog-header-actions"><button class="icon-button" data-close="server-dialog" title="Close" aria-label="Close server connection"><span data-icon="close"></span></button></div>
-      <label class="field" for="server-url">URL<input id="server-url" type="text" spellcheck="false" autocomplete="off" /></label>
-      <label class="field" for="api-key">API key<input id="api-key" type="text" spellcheck="false" autocomplete="off" /></label>
-      <label class="field" for="api-secret">API secret<input id="api-secret" type="password" spellcheck="false" autocomplete="off" /></label>
+      <label class="field" for="server-url">URL<input id="server-url" type="text" placeholder="127.0.0.1" title="LiveKit server address, for example 127.0.0.1" spellcheck="false" autocomplete="off" /></label>
+      <label class="field" for="api-key">API key<input id="api-key" type="text" title="LiveKit API key" spellcheck="false" autocomplete="off" /></label>
+      <label class="field" for="api-secret">API secret<input id="api-secret" type="password" title="LiveKit API secret" spellcheck="false" autocomplete="off" /></label>
       <p id="server-note" class="note" role="alert" hidden></p><div class="actions"><button id="save-server-settings" class="primary icon-action" title="Save server connection" aria-label="Save server connection"><span data-icon="check"></span></button></div>
     </div>
   </dialog>

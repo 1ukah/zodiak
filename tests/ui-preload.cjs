@@ -1,5 +1,5 @@
 const { contextBridge } = require('electron')
-let config = { url: 'ws://localhost:7880', apiKey: 'test', apiSecret: 'test', displayName: 'Alex Morgan' }
+let config = { url: 'ws://localhost:7880', apiKey: 'test', apiSecret: 'test', displayName: 'Alex Morgan', showStreamStatistics: false }
 let rooms = [{ name: 'the-lounge', participants: 3, sharing: false }, { name: 'watch-party', participants: 2, sharing: true }, { name: 'after-hours', participants: 0, sharing: false }]
 let serverAvailable = true
 const ok = value => Promise.resolve({ ok: true, value })
