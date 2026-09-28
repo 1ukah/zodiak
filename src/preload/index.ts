@@ -5,6 +5,7 @@ const api = {
   rendererReady: () => ipcRenderer.send(channels.rendererReady),
   getConfig: () => ipcRenderer.invoke(channels.getConfig),
   saveConfig: (config) => ipcRenderer.invoke(channels.saveConfig, config),
+  checkForUpdates: () => ipcRenderer.invoke(channels.checkForUpdates),
   createToken: (request) => ipcRenderer.invoke(channels.createToken, request),
   listRooms: () => ipcRenderer.invoke(channels.listRooms),
   listRoomParticipants: (request) => ipcRenderer.invoke(channels.listRoomParticipants, request),

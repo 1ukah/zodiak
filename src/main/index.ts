@@ -4,6 +4,7 @@ import { channels, shareBitrateRangeFor, type CaptureAccelerationStatus, type Sh
 import { armCapture, listSources, registerCaptureHandler } from './capture'
 import { startSystemAudio, stopSystemAudio } from './system-audio'
 import { loadConfig, saveConfig } from './config'
+import { checkForUpdatesOnStartup, initializeUpdater, requestUpdateCheck } from './updater'
 import { isRecord } from './parse'
 import { settle } from './result'
 import { createLiveRoom, deleteLiveRoom, listLiveRoomParticipants, listLiveRooms } from './rooms'
@@ -28,6 +29,7 @@ if (app.isPackaged) {
 
 let sleepBlocker: number | null = null
 let gpuInfoReady = false
+let startupUpdateCheckScheduled = false
 
 // Electron documents GPU feature status as valid only after this event.
 app.on('gpu-info-update', () => { gpuInfoReady = true })
@@ -127,6 +129,10 @@ function createWindow(splash: BrowserWindow | null = null): void {
     ipcMain.removeListener(channels.rendererReady, onRendererReady)
     win.show()
     if (splash && !splash.isDestroyed()) splash.close()
+    if (!startupUpdateCheckScheduled) {
+      startupUpdateCheckScheduled = true
+      void checkForUpdatesOnStartup()
+    }
   }
   const onRendererReady = (event: Electron.IpcMainEvent): void => {
     if (event.sender !== win.webContents) return
@@ -238,6 +244,10 @@ function captureAccelerationStatus(): CaptureAccelerationStatus {
 function registerIpc(): void {
   ipcMain.handle(channels.getConfig, () => loadConfig())
   ipcMain.handle(channels.saveConfig, (_event, payload: unknown) => settle(() => saveConfig(payload)))
+  ipcMain.handle(channels.checkForUpdates, () => settle(async () => {
+    await requestUpdateCheck(true)
+    return true as const
+  }))
   ipcMain.handle(channels.createToken, (_event, payload: unknown) => settle(() => createParticipantToken(payload)))
   ipcMain.handle(channels.listRooms, () => settle(() => listLiveRooms()))
   ipcMain.handle(channels.listRoomParticipants, (_event, payload: unknown) => settle(() => listLiveRoomParticipants(payload)))
@@ -295,6 +305,7 @@ function registerPermissions(): void {
 app.whenReady().then(() => {
   registerPermissions()
   registerIpc()
+  initializeUpdater(() => BrowserWindow.getAllWindows()[0] ?? null)
   const splash = createSplash()
   // Let the small splash paint before loading the main renderer and its modules.
   splash.once('ready-to-show', () => {

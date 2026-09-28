@@ -6,6 +6,7 @@ export interface AppConfig {
   apiSecret: string
   displayName: string
   showStreamStatistics: boolean
+  checkForUpdatesOnStartup: boolean
 }
 
 export interface RoomSummary {
@@ -110,6 +111,7 @@ export const channels = {
   rendererReady: 'app:renderer-ready',
   getConfig: 'config:get',
   saveConfig: 'config:save',
+  checkForUpdates: 'update:check',
   createToken: 'token:create',
   listRooms: 'rooms:list',
   listRoomParticipants: 'rooms:list-participants',
@@ -130,6 +132,7 @@ export interface SharescreenApi {
   rendererReady: () => void
   getConfig: () => Promise<AppConfig>
   saveConfig: (config: AppConfig) => Promise<ActionResult<AppConfig>>
+  checkForUpdates: () => Promise<ActionResult<true>>
   createToken: (request: TokenRequest) => Promise<ActionResult<TokenResponse>>
   listRooms: () => Promise<ActionResult<RoomSummary[]>>
   listRoomParticipants: (request: RoomNameRequest) => Promise<ActionResult<RoomParticipantInfo[]>>

@@ -10,7 +10,10 @@
     <nav class="workspace-rail" aria-label="Rooms">
       <div id="room-list" aria-label="Rooms"></div>
       <button id="create-room-action" class="rail-button rail-create" data-create-room title="Create room" aria-label="Create room"><span data-icon="plus"></span></button>
-      <button id="server-settings" class="rail-button rail-server" title="Server connection" aria-label="Server connection"><span data-icon="server"></span></button>
+      <div class="rail-footer">
+        <button id="lobby-settings" class="rail-button" title="Settings" aria-label="Settings"><span data-icon="settings"></span></button>
+        <button id="server-settings" class="rail-button rail-server" title="Server connection" aria-label="Server connection"><span data-icon="server"></span></button>
+      </div>
     </nav>
     <aside class="sidebar" id="room-sidebar" hidden>
       <p id="list-note" class="note" role="alert" hidden></p>
@@ -62,6 +65,8 @@
         <label class="field audio-volume" for="audio-volume"><span class="volume-heading"><span data-icon="volume"></span><output id="audio-volume-value" for="audio-volume">100%</output></span><input id="audio-volume" type="range" min="0" max="200" value="100" title="Global incoming audio volume" aria-label="Global incoming audio volume" /></label><p id="audio-output-note" class="quality-note" role="status" hidden></p>
       </section>
       <label class="check" for="show-stream-statistics"><span>Stream statistics</span><input id="show-stream-statistics" type="checkbox" role="switch" title="Show host and viewer stream statistics" /></label>
+      <label class="check" for="check-for-updates-on-startup"><span>Check for updates on startup</span><input id="check-for-updates-on-startup" type="checkbox" role="switch" title="Check GitHub Releases for a newer zodiak version when the app opens" /></label>
+      <button id="check-for-updates" class="update-check-button" type="button" title="Check for updates now">Check for updates now</button>
       <p id="settings-note" class="note" role="alert" hidden></p><div class="actions"><button id="save-settings" class="primary icon-action" title="Save" aria-label="Save settings"><span data-icon="check"></span></button></div>
     </div>
   </dialog>

@@ -149,6 +149,9 @@ kbd {
   background: #2a283c;
   color: var(--accent);
 }
+body.in-room #lobby-settings {
+  display: none;
+}
 .rail-button.is-active {
   background: #282539;
   color: #c1baff;
@@ -165,6 +168,15 @@ kbd {
 .rail-bottom {
   margin-top: auto;
   background: transparent;
+}
+.rail-footer {
+  display: flex;
+  width: 100%;
+  margin-top: auto;
+  align-items: center;
+  flex: none;
+  flex-direction: column;
+  gap: 10px;
 }
 .sidebar {
   display: flex;
@@ -842,6 +854,24 @@ body.in-room .welcome-mark {
 }
 .control-button:hover {
   background: #30313c;
+}
+.update-check-button {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #4b456e;
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #292440;
+  color: #d7d1ff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.update-check-button:hover:not(:disabled) {
+  background: #373052;
+}
+.update-check-button:disabled {
+  cursor: wait;
+  opacity: .65;
 }
 .primary .icon,.ghost .icon,.danger .icon {
   height: 17px;
@@ -1907,7 +1937,7 @@ body.in-room #shell {
   width: 420px;
 }
 .rail-server {
-  margin-top: auto;
+  margin-top: 0;
   color: #a9abc0;
   background: #1a1b21;
 }
