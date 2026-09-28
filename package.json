@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "productName": "zodiak",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/1ukah/zodiak.git"
+  },
   "main": "./out/main/index.js",
   "scripts": {
     "postinstall": "node ./node_modules/electron/install.js",
@@ -13,6 +17,7 @@
     "build:system-audio-capture": "dotnet publish native/system-audio-capture/SystemAudioCapture.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o native/system-audio-capture/publish",
     "version:sync": "node scripts/sync-version.cjs",
     "pack": "npm run build:system-audio-capture && electron-vite build && electron-builder --win nsis --publish never",
+    "release": "npm run build:system-audio-capture && electron-vite build && electron-builder --win nsis --publish always",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:ui": "electron tests/ui-smoke.cjs",
     "test:startup": "npm run build && electron tests/startup-smoke.cjs"
@@ -26,6 +31,13 @@
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "1ukah",
+        "repo": "zodiak"
+      }
+    ],
     "files": [
       "out/**/*",
       "package.json"
@@ -59,11 +71,13 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
+      "differentialPackage": true,
       "include": "build/installer.nsh",
       "artifactName": "zodiak-setup.exe"
     }
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "livekit-client": "^2.22.3",
     "livekit-server-sdk": "^2.19.1",
     "lucide": "^1.48.0"

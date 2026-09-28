@@ -66,6 +66,7 @@ const audioVolumeInput = byId('audio-volume', HTMLInputElement)
 const audioVolumeValue = byId('audio-volume-value', HTMLOutputElement)
 const audioOutputNote = byId('audio-output-note', HTMLParagraphElement)
 const showStreamStatisticsInput = byId('show-stream-statistics', HTMLInputElement)
+const checkForUpdatesOnStartupInput = byId('check-for-updates-on-startup', HTMLInputElement)
 const settingsDialog = byId('settings-dialog', HTMLDialogElement)
 const serverDialog = byId('server-dialog', HTMLDialogElement)
 const deleteDialog = byId('delete-dialog', HTMLDialogElement)
@@ -172,6 +173,7 @@ function bind(): void {
     newRoomInput.focus()
   }))
   document.querySelectorAll<HTMLButtonElement>('[data-settings]').forEach((button) => button.addEventListener('click', () => openSettings()))
+  elementById('lobby-settings').addEventListener('click', openSettings)
   elementById('server-settings').addEventListener('click', openServerSettings)
   document.querySelectorAll<HTMLButtonElement>('[data-close]').forEach((button) => button.addEventListener('click', () => byId(button.dataset.close!, HTMLDialogElement).close()))
   settingsDialog.addEventListener('close', () => { if (savedConfig) fillForm(savedConfig) })
@@ -202,6 +204,14 @@ function bind(): void {
     button.disabled = true
     try { if (await persistConfig()) { serverDialog.close(); void refreshRooms() } }
     finally { button.disabled = false }
+  })
+  byId('check-for-updates', HTMLButtonElement).addEventListener('click', async () => {
+    const button = byId('check-for-updates', HTMLButtonElement)
+    button.disabled = true
+    try {
+      const result = await window.sharescreen.checkForUpdates()
+      if (!result.ok) showNote(settingsNote, result.error, 'error')
+    } finally { button.disabled = false }
   })
   byId('confirm-delete-room', HTMLButtonElement).addEventListener('click', () => {
     const name = roomPendingDeletion
@@ -944,11 +954,12 @@ async function persistConfig(): Promise<AppConfig | null> {
     fillForm(saved.value); return saved.value
   } catch (error) { openServerSettings(); showNote(serverNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked } }
+function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
   urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
   showStatistics = config.showStreamStatistics
+  checkForUpdatesOnStartupInput.checked = config.checkForUpdatesOnStartup
   showStreamStatisticsInput.checked = showStatistics
   elementById('profile-name').textContent = config.displayName || 'Name'
   elementById('profile-avatar').textContent = initials(config.displayName)

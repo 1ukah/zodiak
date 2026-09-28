@@ -12,6 +12,7 @@ const DEFAULT_CONFIG: AppConfig = {
   apiSecret: '',
   displayName: '',
   showStreamStatistics: false,
+  checkForUpdatesOnStartup: true,
 }
 
 export interface ResolvedServer {
@@ -86,6 +87,7 @@ export function validateConfig(value: unknown): AppConfig {
     apiSecret: requireCredential(value.apiSecret, 'API secret'),
     displayName: optionalDisplayName(value.displayName),
     showStreamStatistics: value.showStreamStatistics === true,
+    checkForUpdatesOnStartup: value.checkForUpdatesOnStartup !== false,
   }
 }
 
@@ -106,6 +108,7 @@ function normalizeStored(value: unknown): AppConfig {
     apiSecret: stringOr(record.apiSecret, '').trim(),
     displayName: stringOr(record.displayName, '').trim(),
     showStreamStatistics: record.showStreamStatistics === true,
+    checkForUpdatesOnStartup: record.checkForUpdatesOnStartup !== false,
   }
 }
 

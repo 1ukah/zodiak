@@ -42,18 +42,7 @@ jobs:
       - name: Apply version to package metadata
         run: npm run version:sync
 
-      - name: Build installer
-        run: npm run pack
-
-      - name: Create GitHub release and upload installer
-        shell: pwsh
+      - name: Build and publish updater release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $asset = "dist/zodiak-setup.exe#zodiak-setup.exe"
-          gh release view $env:GITHUB_REF_NAME 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:GITHUB_REF_NAME $asset --clobber
-          } else {
-            gh release create $env:GITHUB_REF_NAME $asset --title $env:GITHUB_REF_NAME --notes ""
-          }
+        run: npm run release
