@@ -77,6 +77,9 @@ export function initializeUpdater(windowProvider: () => BrowserWindow | null): v
   // A user must explicitly agree before bytes are downloaded or an installer runs.
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
+  // Releases contain the complete NSIS installer and its latest.yml manifest.
+  // Do not request differential blockmaps that we intentionally do not publish.
+  autoUpdater.disableDifferentialDownload = true
   autoUpdater.on('update-available', (info) => { void handleUpdateAvailable(info) })
   autoUpdater.on('update-not-available', () => {
     if (!manualCheckRequested) return

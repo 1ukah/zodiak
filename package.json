@@ -76,7 +76,7 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
-      "differentialPackage": true,
+      "differentialPackage": false,
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeader": "build/installerHeader.bmp",
