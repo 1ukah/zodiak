@@ -1248,6 +1248,26 @@ details summary span {
   grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
+.bitrate-controls {
+  grid-column: 1/-1;
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+  gap: 14px;
+}
+.fixed-bitrate-field span {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.fixed-bitrate-field output {
+  color: #c6bef6;
+  font-variant-numeric: tabular-nums;
+}
+.fixed-bitrate-field input {
+  width: 100%;
+  margin: 5px 0 0;
+  accent-color: var(--accent);
+}
 .check {
   display: flex;
   justify-content: space-between;
