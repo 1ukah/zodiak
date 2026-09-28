@@ -48,4 +48,4 @@ jobs:
         # Keep the GitHub release title identical to the v-prefixed tag.
         # Differential blockmaps are disabled in package.json, so this release
         # contains only the installer and its updater manifest.
-        run: npm run release -- -c.releaseInfo.releaseName=${{ github.ref_name }}
+        run: npm run release -- --config.releaseInfo.releaseName=${{ github.ref_name }}
