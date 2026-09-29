@@ -20,6 +20,7 @@
     "release": "npm run build:system-audio-capture && electron-vite build && electron-builder --win nsis --publish always",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:ui": "electron tests/ui-smoke.cjs",
+    "test:audio": "electron tests/audio-playback.cjs",
     "test:startup": "npm run build && electron tests/startup-smoke.cjs"
   },
   "build": {

@@ -1,5 +1,5 @@
 import { shareBitrateRangeFor, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
-import { hideStream, joinRoom, leaveRoom, publishScreen, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
+import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
 import { hydrateIcons, icon, labelButton } from './icons'
 
 hydrateIcons()
@@ -114,7 +114,14 @@ const hooks: SessionHooks = {
   },
   onViewers: () => renderChrome(),
   onParticipants: (next) => {
-    participants = next
+    // SDK events and server roster polls can list the same people in different
+    // orders. Normalize both before comparing so polls do not shuffle/rebuild UI.
+    const ordered = [...next].sort(compareParticipants)
+    if (ordered.length === participants.length && ordered.every((participant, index) => {
+      const previous = participants[index]
+      return participant.id === previous.id && participant.name === previous.name && participant.local === previous.local
+    })) return
+    participants = ordered
     renderMembers()
     renderChrome()
   },
@@ -271,10 +278,7 @@ function bind(): void {
   })
   stopButton.addEventListener('click', () => void onStop())
   leaveButton.addEventListener('click', () => void onLeave())
-  hearButton.addEventListener('click', () => {
-    const plays = [...audioRack.querySelectorAll('audio')].map((audio) => audio.play())
-    void Promise.allSettled(plays).then(() => { hearButton.hidden = true })
-  })
+  hearButton.addEventListener('click', () => void resumeRemoteAudio())
   refreshButton.addEventListener('click', () => void loadSources())
   audioInput.addEventListener('change', syncSystemAudioControls)
   audioVolumeInput.addEventListener('input', syncAudioVolume)
@@ -692,8 +696,7 @@ function renderGrid(active: boolean): void {
     }
     const group = rank(left) - rank(right)
     if (group !== 0) return group
-    const name = left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
-    return name || left.id.localeCompare(right.id)
+    return compareParticipants(left, right)
   })
   for (const participant of orderedParticipants) {
     const stream = visibleStreams.find((candidate) => candidate.participantId === participant.id)
@@ -765,6 +768,12 @@ function renderGrid(active: boolean): void {
   }
   streamGrid.replaceChildren(tiles)
   setGridVideos(targets)
+}
+
+function compareParticipants(left: RoomParticipant, right: RoomParticipant): number {
+  const name = left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
+  // A stable identity tie-breaker also keeps identical display names in place.
+  return name || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
 }
 
 function renderMembers(): void {

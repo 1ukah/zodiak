@@ -26,6 +26,7 @@ export function hideStream(id) { state.emitStreams(streams.map(s => s.id === id 
 export function setGridVideos(targets) { state.targets = [...targets.keys()] }
 export function setRemoteAudioOutputDevice(id) { state.device = id; return Promise.resolve() }
 export function setRemoteAudioVolume(volume) { state.volume = volume }
+export async function resumeRemoteAudio() { hooks?.onAudioBlocked(false) }
 export function setStreamVolume(id, volume) { state.streamVolume = volume }
 export function setStageVideoVisible() {}
 export function setStreamMuted(id, muted) { state.emitStreams(streams.map(s => s.id === id ? { ...s, muted } : s)) }
