@@ -89,6 +89,13 @@ interface StreamRecord extends ScreenStream {
   publication?: RemoteTrackPublication
 }
 
+interface RemoteAudioGraph {
+  receiverElement: HTMLAudioElement
+  source: MediaStreamAudioSourceNode
+  gain: GainNode
+  destination: MediaStreamAudioDestinationNode
+}
+
 let room: Room | null = null
 let targets: MediaTargets | null = null
 let hooks: SessionHooks | null = null
@@ -101,7 +108,7 @@ let mutedParticipants = new Set<string>()
 let hiddenParticipants = new Set<string>()
 let remoteAudio = new Map<string, HTMLAudioElement>()
 let remoteAudioTracks = new Map<string, RemoteTrack>()
-let remoteAudioGains = new Map<string, GainNode>()
+let remoteAudioGraphs = new Map<string, RemoteAudioGraph>()
 let audioContext: AudioContext | null = null
 let remoteAudioVolume = 1
 let remoteStreamVolumes = new Map<string, number>()
@@ -295,7 +302,10 @@ export function setStreamMuted(id: string, muted: boolean): void {
   if (muted) mutedParticipants.add(record.participantId)
   else mutedParticipants.delete(record.participantId)
   const element = remoteAudio.get(record.participantId)
-  if (element) element.muted = muted
+  if (element) {
+    element.muted = muted
+    applyAudioVolume(record.participantId, element)
+  }
   refreshStreams(requireRoom())
 }
 
@@ -332,6 +342,20 @@ export async function setRemoteAudioOutputDevice(deviceId: string): Promise<void
 
 export function supportsRemoteAudioOutputSelection(): boolean {
   return typeof (HTMLMediaElement.prototype as HTMLMediaElement & { setSinkId?: unknown }).setSinkId === 'function'
+}
+
+/** Retries both Web Audio and element playback after a viewer gesture. */
+export async function resumeRemoteAudio(): Promise<void> {
+  try {
+    await Promise.all([
+      audioContext?.resume(),
+      ...[...remoteAudioGraphs.values()].map(({ receiverElement }) => receiverElement.play()),
+      ...[...remoteAudio.values()].map((element) => element.play()),
+    ])
+    hooks?.onAudioBlocked(false)
+  } catch {
+    hooks?.onAudioBlocked(true)
+  }
 }
 
 export async function leaveRoom(): Promise<void> {
@@ -575,7 +599,7 @@ function syncRemoteAudio(current: Room): void {
 
 async function attachAudio(track: RemoteTrack, participant: RemoteParticipant): Promise<void> {
   const media = targets
-  if (!media || !isScreenAudio(track)) return
+  if (!media || !isScreenAudio(track) || hiddenParticipants.has(participant.identity)) return
   let element = remoteAudio.get(participant.identity)
   if (!element) {
     element = document.createElement('audio')
@@ -584,20 +608,39 @@ async function attachAudio(track: RemoteTrack, participant: RemoteParticipant): 
     media.audioRack.append(element)
     remoteAudio.set(participant.identity, element)
   }
-  applyAudioVolume(participant.identity, element)
-  element.muted = mutedParticipants.has(participant.identity)
-  if (remoteAudioTracks.get(participant.identity) !== track) {
-    const previous = remoteAudioTracks.get(participant.identity)
-    if (previous) previous.detach(element)
-    track.attach(element)
-    remoteAudioTracks.set(participant.identity, track)
-  }
   try {
+    if (remoteAudioTracks.get(participant.identity) !== track) {
+      disconnectRemoteAudioGraph(participant.identity)
+      audioContext ??= new AudioContext()
+      // Chromium's MediaElementAudioSource does not intercept WebRTC playback.
+      // Process the received track directly, then play ONLY the processed stream
+      // through the element so mute and setSinkId still control the audible path.
+      const stream = new MediaStream([track.mediaStreamTrack])
+      // Keep Chromium's remote receiver pulling audio even when only Web Audio
+      // consumes it. This element is always silent and is never a user output.
+      const receiverElement = document.createElement('audio')
+      receiverElement.muted = true
+      receiverElement.volume = 0
+      receiverElement.srcObject = stream
+      const source = audioContext.createMediaStreamSource(stream)
+      const gain = audioContext.createGain()
+      const destination = audioContext.createMediaStreamDestination()
+      gain.gain.value = 0
+      source.connect(gain).connect(destination)
+      remoteAudioGraphs.set(participant.identity, { receiverElement, source, gain, destination })
+      element.srcObject = destination.stream
+      remoteAudioTracks.set(participant.identity, track)
+    }
+    applyAudioVolume(participant.identity, element)
+    element.muted = mutedParticipants.has(participant.identity)
+    await Promise.all([audioContext?.resume(), remoteAudioGraphs.get(participant.identity)?.receiverElement.play()])
+    if (remoteAudio.get(participant.identity) !== element || remoteAudioTracks.get(participant.identity) !== track) return
     await setSinkId(element, remoteAudioOutputDeviceId)
+    if (remoteAudio.get(participant.identity) !== element || remoteAudioTracks.get(participant.identity) !== track) return
     await element.play()
-    hooks?.onAudioBlocked(false)
+    if (remoteAudio.get(participant.identity) === element && remoteAudioTracks.get(participant.identity) === track) hooks?.onAudioBlocked(false)
   } catch {
-    hooks?.onAudioBlocked(true)
+    if (remoteAudio.get(participant.identity) === element) hooks?.onAudioBlocked(true)
   }
 }
 
@@ -610,33 +653,35 @@ function setParticipantScreenAudioSubscribed(identity: string, subscribed: boole
 }
 
 function removeRemoteAudio(identity: string): void {
-  remoteAudioGains.get(identity)?.disconnect()
-  remoteAudioGains.delete(identity)
-  remoteAudio.get(identity)?.remove()
+  disconnectRemoteAudioGraph(identity)
+  const element = remoteAudio.get(identity)
+  if (element) {
+    element.pause()
+    element.srcObject = null
+    element.remove()
+  }
   remoteAudio.delete(identity)
   remoteAudioTracks.delete(identity)
 }
 
 function applyAudioVolume(identity: string, element: HTMLAudioElement): void {
-  const volume = remoteAudioVolume * (remoteStreamVolumes.get(identity) ?? 1)
-  const gain = getAudioGain(identity, element)
-  if (gain) gain.gain.value = volume
-  else element.volume = Math.min(1, volume)
+  const volume = mutedParticipants.has(identity) ? 0 : remoteAudioVolume * (remoteStreamVolumes.get(identity) ?? 1)
+  const gain = remoteAudioGraphs.get(identity)?.gain
+  if (gain) {
+    gain.gain.value = volume
+    element.volume = 1
+  }
 }
 
-function getAudioGain(identity: string, element: HTMLAudioElement): GainNode | null {
-  const existing = remoteAudioGains.get(identity)
-  if (existing) return existing
-  try {
-    audioContext ??= new AudioContext()
-    const gain = audioContext.createGain()
-    audioContext.createMediaElementSource(element).connect(gain).connect(audioContext.destination)
-    remoteAudioGains.set(identity, gain)
-    void audioContext.resume().catch(() => undefined)
-    return gain
-  } catch {
-    return null
-  }
+function disconnectRemoteAudioGraph(identity: string): void {
+  const graph = remoteAudioGraphs.get(identity)
+  if (!graph) return
+  graph.receiverElement.pause()
+  graph.receiverElement.srcObject = null
+  graph.source.disconnect()
+  graph.gain.disconnect()
+  graph.destination.stream.getTracks().forEach((track) => track.stop())
+  remoteAudioGraphs.delete(identity)
 }
 
 function setSinkId(element: HTMLAudioElement, deviceId: string): Promise<void> {
@@ -669,11 +714,10 @@ function clearMedia(): void {
   selectedStreamId = null
   mutedParticipants.clear()
   hiddenParticipants.clear()
-  remoteAudio.forEach((element) => element.remove())
-  remoteAudio.clear()
-  remoteAudioTracks.clear()
-  remoteAudioGains.forEach((gain) => gain.disconnect())
-  remoteAudioGains.clear()
+  remoteAudio.forEach((_element, identity) => removeRemoteAudio(identity))
+  const context = audioContext
+  audioContext = null
+  if (context) void context.close().catch(() => undefined)
   remoteStreamVolumes.clear()
   localScreenTargetBitrate = undefined
   localParticipantName = undefined
