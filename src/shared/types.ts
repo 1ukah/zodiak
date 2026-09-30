@@ -58,7 +58,7 @@ export interface ShareRequest {
 }
 
 export type ShareResolution = '480p' | '720p' | '1080p' | '1440p'
-export type ShareFrameRate = 5 | 15 | 24 | 30 | 60
+export type ShareFrameRate = 5 | 15 | 24 | 30 | 60 | 120
 export type ShareBitrateMode = 'dynamic' | 'fixed'
 export type SharePriority = 'quality' | 'framerate'
 
@@ -77,15 +77,21 @@ export interface ShareBitrateRange {
 }
 
 /** Adaptive bitrate bounds, in bits per second, for each quality profile. */
-export const shareBitrateProfiles: Record<ShareResolution, Record<ShareFrameRate, ShareBitrateRange>> = {
-  '480p': { 5: { min: 150_000, max: 600_000 }, 15: { min: 400_000, max: 1_500_000 }, 24: { min: 600_000, max: 2_000_000 }, 30: { min: 750_000, max: 2_500_000 }, 60: { min: 1_200_000, max: 4_000_000 } },
-  '720p': { 5: { min: 250_000, max: 1_000_000 }, 15: { min: 700_000, max: 2_500_000 }, 24: { min: 1_000_000, max: 3_500_000 }, 30: { min: 1_250_000, max: 4_500_000 }, 60: { min: 2_000_000, max: 7_500_000 } },
+export const shareBitrateProfiles: Record<ShareResolution, Partial<Record<ShareFrameRate, ShareBitrateRange>>> = {
+  '480p': { 5: { min: 150_000, max: 600_000 }, 15: { min: 400_000, max: 1_500_000 }, 24: { min: 600_000, max: 2_000_000 }, 30: { min: 750_000, max: 2_500_000 }, 60: { min: 1_200_000, max: 4_000_000 }, 120: { min: 3_500_000, max: 9_000_000 } },
+  '720p': { 5: { min: 250_000, max: 1_000_000 }, 15: { min: 700_000, max: 2_500_000 }, 24: { min: 1_000_000, max: 3_500_000 }, 30: { min: 1_250_000, max: 4_500_000 }, 60: { min: 2_000_000, max: 7_500_000 }, 120: { min: 6_000_000, max: 16_000_000 } },
   '1080p': { 5: { min: 450_000, max: 1_800_000 }, 15: { min: 1_200_000, max: 4_500_000 }, 24: { min: 1_800_000, max: 6_500_000 }, 30: { min: 2_250_000, max: 8_000_000 }, 60: { min: 3_500_000, max: 12_000_000 } },
   '1440p': { 5: { min: 900_000, max: 3_500_000 }, 15: { min: 2_200_000, max: 8_000_000 }, 24: { min: 3_000_000, max: 11_000_000 }, 30: { min: 4_000_000, max: 14_000_000 }, 60: { min: 5_000_000, max: 20_000_000 } },
 }
 
 export function shareBitrateRangeFor(quality: Pick<ShareQuality, 'resolution' | 'frameRate'>): ShareBitrateRange {
-  return shareBitrateProfiles[quality.resolution][quality.frameRate]
+  const range = shareBitrateProfiles[quality.resolution][quality.frameRate]
+  if (!range) throw new Error(`Unsupported share quality: ${quality.resolution} at ${quality.frameRate} fps`)
+  return range
+}
+
+export function supportsShareQuality(quality: Pick<ShareQuality, 'resolution' | 'frameRate'>): boolean {
+  return shareBitrateProfiles[quality.resolution][quality.frameRate] !== undefined
 }
 
 export function shareBitrateFor(quality: ShareQuality): number {
