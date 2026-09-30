@@ -123,6 +123,7 @@ let lastStats = new Map<string, CounterSample>()
 let telemetryInFlight = false
 let localScreenTargetBitrate: number | undefined
 let localParticipantName: string | undefined
+const participantNameCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
 
 interface CounterSample {
   bytes: number
@@ -467,7 +468,19 @@ function refreshParticipants(current: Room): void {
   current.remoteParticipants.forEach((participant) => {
     next.push({ id: participant.identity, name: participant.name || participant.identity, local: false })
   })
-  hooks?.onParticipants(next)
+  emitParticipants(next)
+}
+
+/**
+ * The SDK and the server roster can return the same people in different
+ * orders. Normalize at the session boundary so a roster refresh never moves
+ * otherwise unchanged participant tiles.
+ */
+function emitParticipants(next: RoomParticipant[]): void {
+  hooks?.onParticipants([...next].sort((left, right) => {
+    const byName = participantNameCollator.compare(left.name, right.name)
+    return byName || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+  }))
 }
 
 /**
@@ -489,7 +502,7 @@ async function refreshRoster(current: Room): Promise<void> {
       .filter((participant) => participant.id !== local.id)
       .map((participant) => ({ ...participant, local: false }))
     hooks?.onViewers(remotes.length)
-    hooks?.onParticipants([local, ...remotes])
+    emitParticipants([local, ...remotes])
   } catch {
     // The SDK's live roster remains displayed while the server is unavailable.
   } finally {

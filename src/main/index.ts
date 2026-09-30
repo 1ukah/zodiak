@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, powerSaveBlocker, session } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { channels, shareBitrateRangeFor, type CaptureAccelerationStatus, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareResolution, type ShareStartRequest } from '../shared/types'
+import { channels, shareBitrateRangeFor, supportsShareQuality, type CaptureAccelerationStatus, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareResolution, type ShareStartRequest } from '../shared/types'
 import { armCapture, listSources, registerCaptureHandler } from './capture'
 import { startSystemAudio, stopSystemAudio } from './system-audio'
 import { loadConfig, saveConfig } from './config'
@@ -36,15 +36,21 @@ let startupUpdateCheckScheduled = false
 app.on('gpu-info-update', () => { gpuInfoReady = true })
 
 function appIcon() {
+  const svgPath = app.isPackaged
+    ? join(process.resourcesPath, 'icon.svg')
+    : join(__dirname, '../../build/icon.svg')
+  const svgIcon = nativeImage.createFromPath(svgPath)
+  if (!svgIcon.isEmpty()) return svgIcon
+
   return nativeImage.createFromPath(app.isPackaged
     ? join(process.resourcesPath, 'app-icon.png')
     : join(__dirname, '../../build/icon.png'))
 }
 
-function splashIcon() {
+function splashLogo() {
   const svgPath = app.isPackaged
-    ? join(process.resourcesPath, 'icon.svg')
-    : join(__dirname, '../../build/icon.svg')
+    ? join(process.resourcesPath, 'logo.svg')
+    : join(__dirname, '../../build/logo.svg')
   return `data:image/svg+xml;base64,${readFileSync(svgPath).toString('base64')}`
 }
 
@@ -61,7 +67,7 @@ function createSplash(): BrowserWindow {
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
   splash.setMenuBarVisibility(false)
-  void splash.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(splashMarkup(splashIcon()))}`)
+  void splash.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(splashMarkup(splashLogo()))}`)
   return splash
 }
 
@@ -204,7 +210,7 @@ function parseShareRequest(value: unknown): ShareStartRequest {
   const priority = value.quality.priority
   const bitrateMode = value.quality.bitrateMode
   const bitrate = value.quality.bitrate
-  if (!isResolution(resolution) || !isFrameRate(frameRate) || !isPriority(priority) || !isBitrateMode(bitrateMode)) {
+  if (!isResolution(resolution) || !isFrameRate(frameRate) || !supportsShareQuality({ resolution, frameRate }) || !isPriority(priority) || !isBitrateMode(bitrateMode)) {
     throw new Error('This resolution and frame rate cannot be used together')
   }
   const bitrateRange = shareBitrateRangeFor({ resolution, frameRate })
@@ -225,7 +231,7 @@ function isResolution(value: unknown): value is ShareResolution {
 }
 
 function isFrameRate(value: unknown): value is ShareFrameRate {
-  return value === 5 || value === 15 || value === 24 || value === 30 || value === 60
+  return value === 5 || value === 15 || value === 24 || value === 30 || value === 60 || value === 120
 }
 
 function isBitrateMode(value: unknown): value is ShareBitrateMode {

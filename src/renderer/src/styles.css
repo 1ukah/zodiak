@@ -390,9 +390,22 @@ body.in-room #lobby-settings {
 .member-name {
   font-size: 12px;
   color: #b6b7c5;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.member-live {
+  flex: none;
+  padding: 1px 3px 0;
+  border: 1px solid #e96774;
+  border-radius: 0;
+  background: transparent;
+  color: #f17b87;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .55px;
+  line-height: 12px;
 }
 .member-you {
   margin-left: auto;
@@ -1475,7 +1488,7 @@ body.theater #stage-video {
 #stage-wrap.screen-controls-idle .focused-stream-hide,
 #stage-wrap.screen-controls-idle #stream-metrics,
 #stage-wrap.screen-controls-idle .grid-stream-audio-controls,
-#stage-wrap.screen-controls-idle .grid-tile-hide {
+#stage-wrap.screen-controls-idle .grid-stream-hide-control {
   opacity: 0;
   pointer-events: none;
 }
@@ -1569,13 +1582,14 @@ body.theater #shell {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
   background: #0c0d10;
-  color: #858594;
-  font-size: 10px;
+  color: #c4c5d0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -.1px;
   -webkit-app-region: drag;
   user-select: none;
-  padding: 0 140px;
+  padding: 0 14px;
   border-bottom: 1px solid #292a33;
 }
 .app-titlebar .icon {
@@ -1584,9 +1598,10 @@ body.theater #shell {
   color: #a8a0ff;
 }
 .app-titlebar-logo {
-  width: 12px;
-  height: 15px;
+  width: 22px;
+  height: 12px;
   display: block;
+  object-fit: contain;
   pointer-events: none;
 }
 #shell {
@@ -1906,6 +1921,14 @@ body.in-room #shell {
 }
 .members-heading {
   margin: 0 4px 10px;
+  justify-content: flex-start;
+  gap: 6px;
+}
+#members-count {
+  color: #b6b7c5;
+  font-size: 12px;
+  letter-spacing: 0;
+  line-height: 15px;
 }
 #members-list {
   overflow: auto;
@@ -1984,7 +2007,11 @@ body.in-room #shell {
 .grid-tile.is-available {
   display: grid;
   place-items: center;
-  background: radial-gradient(ellipse at center,hsl(var(--avatar-hue,252) 14% 16%),#191a20 75%);
+  /* A shared screen is an active state, not a variation of the person's
+     avatar. The solid indigo surface distinguishes it at a glance. */
+  background: #202331;
+  border-color: #565481;
+  box-shadow: inset 0 0 0 1px #a8a0ff1f;
 }
 .grid-tile.is-available .avatar {
   width: 76px;
@@ -1994,15 +2021,27 @@ body.in-room #shell {
 }
 .stream-available-monitor {
   position: absolute;
-  top: 50%;
+  top: calc(50% - 32px);
   left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--accent);
-  opacity: .72;
-  transform: translate(-50%,-62%);
+  transform: translate(-50%,-50%);
 }
 .stream-available-monitor .icon {
-  width: 48px;
-  height: 48px;
+  width: 46px;
+  height: 46px;
+}
+.stream-available-status {
+  position: absolute;
+  top: calc(50% + 14px);
+  left: 50%;
+  color: #e0ddff;
+  font-size: 14px;
+  font-weight: 650;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 .start-watching {
   position: absolute;
@@ -2020,10 +2059,10 @@ body.in-room #shell {
 }
 .start-watching-label {
   position: absolute;
-  top: calc(50% + 64px);
+  top: calc(50% + 45px);
   left: 50%;
-  color: #d8d1ff;
-  font-size: 11px;
+  color: #bdb9dd;
+  font-size: 13px;
   font-weight: 600;
   transform: translateX(-50%);
 }
@@ -2065,11 +2104,20 @@ body.in-room #shell {
   color: #d4d3df;
   z-index: 1;
 }
-.grid-tile-hide {
+.grid-stream-hide-control {
   position: absolute;
   right: 52px;
   left: auto;
   bottom: 10px;
+  z-index: 1;
+  display: flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: #191a20;
+  border-radius: 8px;
   opacity: .72;
   transition: opacity .18s ease;
 }
@@ -2094,8 +2142,8 @@ body.in-room #shell {
 }
 .grid-tile:hover .grid-stream-audio-controls,
 .grid-tile:focus-within .grid-stream-audio-controls,
-.grid-tile:hover .grid-tile-hide,
-.grid-tile:focus-within .grid-tile-hide {
+.grid-tile:hover .grid-stream-hide-control,
+.grid-tile:focus-within .grid-stream-hide-control {
   opacity: 1;
 }
 .grid-stream-audio-controls:hover,

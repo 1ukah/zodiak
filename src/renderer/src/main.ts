@@ -1,4 +1,4 @@
-import { shareBitrateRangeFor, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
+import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
 import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
 import { hydrateIcons, icon, labelButton } from './icons'
 
@@ -134,6 +134,7 @@ const hooks: SessionHooks = {
     for (const id of streamVolumes.keys()) if (!next.some((stream) => stream.id === id)) streamVolumes.delete(id)
     if (selectedStreamId && !streams.some((stream) => stream.id === selectedStreamId)) selectedStreamId = null
     if (!selectedStreamId && next.some((stream) => stream.local)) selectBestStream()
+    renderMembers()
     renderChrome()
   },
   onTelemetry: (next) => {
@@ -238,6 +239,9 @@ function bind(): void {
   })
   hideMyScreenButton.addEventListener('click', () => {
     hideLocalPreview = !hideLocalPreview
+    // Keep a hidden local share reachable from the same available-stream card
+    // used for remote shares, instead of removing it from the overview.
+    if (hideLocalPreview) gridView = true
     selectBestStream()
     renderChrome()
   })
@@ -618,12 +622,15 @@ function renderChrome(): void {
   syncScreenControlsVisibility(hasVideo)
   fullscreenButton.hidden = !hasVideo
   popOutButton.hidden = !hasVideo || gridView
-  const canUseGrid = streams.length > 0 && participants.length > 1
-  gridViewButton.hidden = !canUseGrid
+  const canUseGrid = streams.length > 0 && (participants.length > 1 || (hideLocalPreview && Boolean(localStream)))
+  // Unwatched streams only have available cards; there is nothing to focus
+  // yet. Keep that overview visible and do not offer a broken focus action.
+  const canToggleGrid = canUseGrid && hasVideo
+  gridViewButton.hidden = !canToggleGrid
   labelButton(gridViewButton, gridView ? 'Focus selected stream' : 'Show all streams')
   gridViewButton.setAttribute('aria-pressed', String(gridView))
   theaterButton.hidden = !hasVideo
-  const useGrid = gridView && canUseGrid
+  const useGrid = canUseGrid && (gridView || !hasVideo)
   popOutButton.hidden = !hasVideo || useGrid
   video.hidden = useGrid || !selectedStreamId
   streamGrid.hidden = !useGrid
@@ -678,8 +685,10 @@ function syncFocusedStreamVolume(): void {
 }
 
 function renderGrid(active: boolean): void {
-  const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
-  const signature = active ? JSON.stringify({ participants, streams: visibleStreams.map((stream) => [stream.id, stream.subscribed, stream.muted, streamVolumes.get(stream.id) ?? 1]) }) : ''
+  // A hidden local preview remains in the overview as an available stream so
+  // its owner can restore it by clicking the card.
+  const visibleStreams = streams
+  const signature = active ? JSON.stringify({ participants, localPreviewHidden: hideLocalPreview, streams: visibleStreams.map((stream) => [stream.id, stream.subscribed, stream.muted, streamVolumes.get(stream.id) ?? 1]) }) : ''
   if (signature === lastGridSignature) return
   lastGridSignature = signature
   if (!active) {
@@ -692,7 +701,7 @@ function renderGrid(active: boolean): void {
   const orderedParticipants = [...participants].sort((left, right) => {
     const rank = (participant: RoomParticipant): number => {
       const stream = visibleStreams.find((candidate) => candidate.participantId === participant.id)
-      return stream?.subscribed ? 0 : stream ? 1 : 2
+      return stream?.subscribed && !(stream.local && hideLocalPreview) ? 0 : stream ? 1 : 2
     }
     const group = rank(left) - rank(right)
     if (group !== 0) return group
@@ -701,7 +710,7 @@ function renderGrid(active: boolean): void {
   for (const participant of orderedParticipants) {
     const stream = visibleStreams.find((candidate) => candidate.participantId === participant.id)
     const tile = Object.assign(document.createElement('article'), { className: 'grid-tile' })
-    if (stream && stream.subscribed) {
+    if (stream && stream.subscribed && !(stream.local && hideLocalPreview)) {
       tile.classList.add('is-stream')
       tile.tabIndex = 0
       tile.setAttribute('role', 'button')
@@ -739,25 +748,31 @@ function renderGrid(active: boolean): void {
         volume.addEventListener('input', updateVolume)
         volume.addEventListener('click', (event) => event.stopPropagation())
         audioControls.append(volume, mute)
+        const hideControls = Object.assign(document.createElement('div'), { className: 'grid-stream-hide-control' })
         const hide = Object.assign(document.createElement('button'), { type: 'button', className: 'grid-tile-hide' })
         hide.innerHTML = icon('eye-off')
         labelButton(hide, `Hide ${stream.participantName}'s screen`)
         hide.addEventListener('pointerdown', (event) => event.stopPropagation())
         hide.addEventListener('click', (event) => { event.stopPropagation(); hideStream(stream.id); renderChrome() })
-        tile.append(audioControls, hide)
+        hideControls.append(hide)
+        tile.append(audioControls, hideControls)
       }
     } else if (stream) {
       tile.classList.add('is-stream', 'is-available')
-      const watch = () => { selectedStreamId = stream.id; watchStream(stream.id); selectStream(stream.id); renderChrome() }
+      const watch = () => {
+        if (stream.local) hideLocalPreview = false
+        selectedStreamId = stream.id; watchStream(stream.id); selectStream(stream.id); renderChrome()
+      }
       tile.addEventListener('click', watch)
       const monitor = Object.assign(document.createElement('span'), { className: 'stream-available-monitor' })
       monitor.innerHTML = icon('monitor')
+      const status = Object.assign(document.createElement('span'), { className: 'stream-available-status', textContent: 'Sharing screen' })
       // This button fills the card; the visible label is only its call to
       // action, while any click elsewhere on the card starts watching too.
       const startWatching = Object.assign(document.createElement('button'), { type: 'button', className: 'start-watching' })
       labelButton(startWatching, `Click to watch ${stream.participantName}'s screen`)
       startWatching.append(Object.assign(document.createElement('span'), { className: 'start-watching-label', textContent: 'Click to watch' }))
-      tile.append(monitor, startWatching)
+      tile.append(monitor, status, startWatching)
     } else {
       tile.classList.add('is-participant')
       tile.style.setProperty('--avatar-hue', String(avatarHue(participant.name)))
@@ -780,10 +795,21 @@ function renderMembers(): void {
   membersList.replaceChildren()
   membersPanel.hidden = currentRoom === null
   membersCount.textContent = String(participants.length)
-  for (const participant of participants) {
+  const orderedParticipants = [...participants].sort((left, right) => {
+    const leftStreaming = streams.some((stream) => stream.participantId === left.id)
+    const rightStreaming = streams.some((stream) => stream.participantId === right.id)
+    if (leftStreaming !== rightStreaming) return leftStreaming ? -1 : 1
+    return compareParticipants(left, right)
+  })
+  for (const participant of orderedParticipants) {
     const member = Object.assign(document.createElement('div'), { className: 'member' })
     member.append(makeAvatar(participant.name))
     member.append(Object.assign(document.createElement('span'), { className: 'member-name', textContent: participant.name }))
+    if (streams.some((stream) => stream.participantId === participant.id)) {
+      const live = Object.assign(document.createElement('span'), { className: 'member-live', textContent: 'LIVE' })
+      live.setAttribute('aria-label', `${participant.name} is sharing a screen`)
+      member.append(live)
+    }
     if (participant.local) member.title = 'You'
     membersList.append(member)
   }
@@ -792,6 +818,14 @@ function renderMembers(): void {
 
 function syncQualityControls(): void {
   const resolution = resolutionInput.value as ShareResolution
+  for (const option of frameRateInput.options) {
+    option.disabled = !supportsShareQuality({ resolution, frameRate: Number(option.value) as ShareFrameRate })
+  }
+  if (frameRateInput.selectedOptions[0]?.disabled) {
+    frameRateInput.value = frameRateInput.querySelector<HTMLOptionElement>('option[value="60"]:not(:disabled)')?.value
+      ?? frameRateInput.querySelector<HTMLOptionElement>('option:not(:disabled)')?.value
+      ?? ''
+  }
   const frameRate = Number(frameRateInput.value) as ShareFrameRate
   const bitrateMode = bitrateModeInput.value as ShareBitrateMode
   const priority = priorityInput.value as SharePriority
