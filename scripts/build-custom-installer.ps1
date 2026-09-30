@@ -60,9 +60,22 @@ releaseDate: '$releaseDate'
       throw 'GitHub CLI is required to publish the custom setup executable.'
     }
     $tag = "v$version"
-    & gh release view $tag 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    # A missing release is the normal first-publish path. PowerShell 7 can
+    # turn gh's non-zero probe into a terminating NativeCommandError when
+    # ErrorActionPreference is Stop, so keep that expected result contained.
+    $releaseExists = $false
+    try {
+      & gh release view $tag 2>$null
+      $releaseExists = $LASTEXITCODE -eq 0
+    }
+    catch {
+      $releaseExists = $false
+    }
+    if (-not $releaseExists) {
       & gh release create $tag --title $tag --generate-notes
+      if ($LASTEXITCODE -ne 0) {
+        throw 'GitHub release creation failed.'
+      }
     }
     & gh release upload $tag $publicInstaller $updateManifest --clobber
     if ($LASTEXITCODE -ne 0) {
