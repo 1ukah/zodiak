@@ -46,12 +46,11 @@ static class Program {
   [MTAThread] static int Main(string[] args) { CoInitializeEx(IntPtr.Zero,0); try { if(args.Length is <1 or >2||!uint.TryParse(args[0],out var pid)||pid==0||(args.Length==2&&args[1]!="discord"))return Fail("A Zodiak process ID is required."); if(args.Length==2)return Mix(pid); var client=ActivateLoopback(pid,1); if(client==null)return Fail("Windows process-loopback exclusion is unavailable."); if(Prepare(client,out var capture,out var signal)<0)return Fail("Could not initialize protected system-audio capture."); Console.Error.WriteLine($"ready exclude {pid}"); Console.Error.Flush(); if(client.Start()<0)return Fail("Could not start protected system-audio capture."); return Pump(capture,signal); }catch(Exception e){return Fail(e.Message);} }
   static int Fail(string text){Console.Error.WriteLine("error "+text);return 1;}
   static int Mix(uint self){
-    if(ActivateLoopback(self,0)==null)return Fail("Windows process-loopback capture is unavailable.");
-    timeBeginPeriod(1);var sources=new Dictionary<uint,Source>();Refresh(self,sources);Console.Error.WriteLine($"ready mix {self}");Console.Error.Flush();
+    timeBeginPeriod(1);var sources=new Dictionary<uint,Source>();Console.Error.WriteLine($"ready mix {self}");Console.Error.Flush();
     var output=Console.OpenStandardOutput();var clock=Stopwatch.StartNew();long written=0,scanned=0;var read=Array.Empty<short>();var sum=Array.Empty<int>();var bytes=Array.Empty<byte>();var dead=new List<uint>();
     while(true){
       Thread.Sleep(5);
-      if(clock.ElapsedMilliseconds-scanned>=1000){scanned=clock.ElapsedMilliseconds;Refresh(self,sources);}
+      if(scanned==0||clock.ElapsedMilliseconds-scanned>=1000){scanned=clock.ElapsedMilliseconds;try{Refresh(self,sources);}catch{}}
       foreach(var (pid,s) in sources){try{while(true){s.Capture.GetNextPacketSize(out var next);if(next==0)break;s.Capture.GetBuffer(out var data,out var frames,out var flags,out _,out _);var count=checked((int)frames*2);if(read.Length<count)read=new short[count];if((flags&Silent)!=0||data==IntPtr.Zero)Array.Clear(read,0,count);else Marshal.Copy(data,read,0,count);s.Capture.ReleaseBuffer(frames);s.Queue.AddRange(new ArraySegment<short>(read,0,count));}}catch{dead.Add(pid);}}
       foreach(var pid in dead)Remove(sources,pid);dead.Clear();
       var due=clock.ElapsedTicks*48000/Stopwatch.Frequency-written;if(due>4800){written+=due-480;due=480;}if(due<=0)continue;
@@ -62,7 +61,7 @@ static class Program {
     }
   }
   static void Refresh(uint self,Dictionary<uint,Source> sources){
-    var all=Processes();var roots=all.Where(p=>p.Value.name.StartsWith("Discord",StringComparison.OrdinalIgnoreCase)).Select(p=>p.Key).Append(self).ToList();
+    var all=Processes();var roots=all.Where(p=>p.Value.name!=null&&p.Value.name.StartsWith("Discord",StringComparison.OrdinalIgnoreCase)).Select(p=>p.Key).Append(self).ToList();
     Failed.RemoveWhere(pid=>!all.ContainsKey(pid));
     foreach(var pid in sources.Keys.ToList())if(!all.ContainsKey(pid)||roots.Any(r=>Related(pid,r,all)))Remove(sources,pid);
     foreach(var pid in SessionPids()){
