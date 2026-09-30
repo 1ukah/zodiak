@@ -62,7 +62,7 @@ releaseDate: '$releaseDate'
     $tag = "v$version"
     & gh release view $tag 2>$null
     if ($LASTEXITCODE -ne 0) {
-      & gh release create $tag --title "zodiak $version" --generate-notes
+      & gh release create $tag --title $tag --generate-notes
     }
     & gh release upload $tag $publicInstaller $updateManifest --clobber
     if ($LASTEXITCODE -ne 0) {
