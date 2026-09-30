@@ -38,3 +38,8 @@ npm run pack
 ```
 
 `npm run pack` creates the Windows installer at `dist/zodiak-setup.exe`. Building the installer also requires the .NET 8 SDK for the system-audio helper.
+
+## Screenshot
+
+<img width="1920" height="1032" alt="zodiak_tdgHuQfqsp" src="https://github.com/user-attachments/assets/1a032d43-c712-488a-9d5e-5093013fcd90" />
+
