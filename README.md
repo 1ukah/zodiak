@@ -1,5 +1,10 @@
 # Zodiak
 
+<p align="center">
+  <img width="96" height="96" alt="icon" src="https://github.com/user-attachments/assets/6fe87a16-b1f6-4c1d-8511-89a476d38c81" />
+</p>
+
+
 Zodiak is a Windows desktop app for sharing screens with people in rooms on a LiveKit server.
 
 ## What it does
@@ -41,5 +46,5 @@ npm run pack
 
 ## Screenshot
 
-<img width="1920" height="1032" alt="zodiak_tdgHuQfqsp" src="https://github.com/user-attachments/assets/1a032d43-c712-488a-9d5e-5093013fcd90" />
+<img width="1920" height="1032" alt="zodiak_NuQeg2SrVu" src="https://github.com/user-attachments/assets/cdd212d1-d369-40d7-b37e-89a909978273" />
 
