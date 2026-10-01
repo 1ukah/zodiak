@@ -28,14 +28,13 @@ export async function createParticipantToken(value: unknown): Promise<TokenRespo
       metadata: JSON.stringify({ role: request.role }),
     })
     // Everyone in a room receives the same screen-only publishing grant. This
-    // enables several simultaneous screen shares while still excluding camera,
-    // microphone, data and text-chat capabilities.
+    // enables screen shares and room-scoped chat while excluding camera/microphone.
     token.addGrant({
       roomJoin: true,
       room: request.room,
       canPublish: true,
       canSubscribe: true,
-      canPublishData: false,
+      canPublishData: true,
       // Lets a connected participant update their own display name without
       // granting access to any other participant's profile.
       canUpdateOwnMetadata: true,

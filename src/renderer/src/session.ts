@@ -13,6 +13,7 @@ import {
 } from 'livekit-client'
 import { shareBitrateFor, type SharePriority, type ShareQuality } from '../../shared/types'
 import { closeSystemAudio, openSystemAudioTrack } from './system-audio'
+import { CHAT_MAX_BYTES, CHAT_MAX_LENGTH, CHAT_TOPIC, parseChatPacket, type ChatMessage, type ChatPacket } from '../../shared/chat'
 
 export interface MediaTargets {
   video: HTMLVideoElement
@@ -75,6 +76,9 @@ export interface StreamTelemetry {
 export type Presence = 'offline' | 'connecting' | 'connected' | 'reconnecting'
 
 export interface SessionHooks {
+  /** Unexpected disconnects only; explicit leave/switch never emits this. */
+  onRoomLost?: () => void
+  onChatMessage: (message: ChatMessage) => void
   onConnection: (state: Presence) => void
   onViewers: (count: number) => void
   onParticipants: (participants: RoomParticipant[]) => void
@@ -123,6 +127,7 @@ let lastStats = new Map<string, CounterSample>()
 let telemetryInFlight = false
 let localScreenTargetBitrate: number | undefined
 let localParticipantName: string | undefined
+const receivedChatIds = new Set<string>()
 const participantNameCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
 
 interface CounterSample {
@@ -144,6 +149,7 @@ export async function joinRoom(args: {
   roster?: () => Promise<RosterParticipant[]>
 }): Promise<void> {
   await leaveRoom()
+  receivedChatIds.clear()
   targets = args.media
   hooks = args.hooks
   rosterProvider = args.roster ?? null
@@ -230,6 +236,19 @@ export async function updateDisplayName(name: string): Promise<void> {
   localParticipantName = name
   refreshParticipants(current)
   refreshStreams(current)
+}
+
+export async function sendChatMessage(text: string, recipient?: string): Promise<ChatMessage> {
+  const current = requireRoom()
+  if (current.state !== ConnectionState.Connected) throw new Error('Wait for the room to reconnect.')
+  if (!text.trim() || text.length > CHAT_MAX_LENGTH) throw new Error(`Messages can contain up to ${CHAT_MAX_LENGTH} characters.`)
+  if (recipient && !current.remoteParticipants.has(recipient)) throw new Error('This person has left the room.')
+  const packet: ChatPacket = { version: 1, id: crypto.randomUUID(), text: text.trim(), timestamp: Date.now(), ...(recipient ? { recipient } : {}) }
+  const data = new TextEncoder().encode(JSON.stringify(packet))
+  if (data.byteLength > CHAT_MAX_BYTES) throw new Error('This message is too large.')
+  await current.localParticipant.publishData(data, { reliable: true, topic: CHAT_TOPIC, ...(recipient ? { destinationIdentities: [recipient] } : {}) })
+  if (room !== current) throw new Error('You left the room before the message was sent.')
+  return { ...packet, senderId: current.localParticipant.identity, senderName: displayNameForLocal(current), local: true }
 }
 
 export async function unpublishScreen(): Promise<void> {
@@ -377,6 +396,16 @@ function requireRoom(): Room {
 }
 
 function bindRoom(next: Room): void {
+  next.on(RoomEvent.DataReceived, (data, participant, _kind, topic) => {
+    if (room !== next || topic !== CHAT_TOPIC || !participant) return
+    const packet = parseChatPacket(data)
+    if (!packet || (packet.recipient && packet.recipient !== next.localParticipant.identity)) return
+    const key = `${participant.identity}:${packet.id}`
+    if (receivedChatIds.has(key)) return
+    receivedChatIds.add(key)
+    if (receivedChatIds.size > 5_000) receivedChatIds.delete(receivedChatIds.values().next().value!)
+    hooks?.onChatMessage({ ...packet, timestamp: Math.abs(Date.now() - packet.timestamp) < 300_000 ? packet.timestamp : Date.now(), senderId: participant.identity, senderName: participant.name || participant.identity, local: false })
+  })
   next.on(RoomEvent.ConnectionStateChanged, (state) => {
     if (room !== next) return
     hooks?.onConnection(toPresence(state))
@@ -419,6 +448,7 @@ function bindRoom(next: Room): void {
   next.on(RoomEvent.Disconnected, (reason) => {
     if (room !== next) return
     hooks?.onConnection('offline')
+    if (!suppressDisconnectError && reason !== DisconnectReason.CLIENT_INITIATED) hooks?.onRoomLost?.()
     if (!suppressDisconnectError && reason !== undefined && reason !== DisconnectReason.CLIENT_INITIATED) {
       hooks?.onError(`Disconnected (${reasonLabel(reason)})`)
     }

@@ -20,6 +20,8 @@
     "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-installer.ps1 -Publish",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:ui": "electron tests/ui-smoke.cjs",
+    "test:chat": "node tests/chat-protocol.cjs && electron tests/chat-ui.cjs",
+    "test:chat:live": "electron tests/chat-live.cjs",
     "test:audio": "electron tests/audio-playback.cjs",
     "test:startup": "npm run build && electron tests/startup-smoke.cjs"
   },

@@ -1,6 +1,7 @@
 import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
-import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
+import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, sendChatMessage, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
 import { hydrateIcons, icon, labelButton } from './icons'
+import { RoomChat } from './chat'
 
 hydrateIcons()
 
@@ -67,6 +68,8 @@ const audioVolumeValue = byId('audio-volume-value', HTMLOutputElement)
 const audioOutputNote = byId('audio-output-note', HTMLParagraphElement)
 const showStreamStatisticsInput = byId('show-stream-statistics', HTMLInputElement)
 const checkForUpdatesOnStartupInput = byId('check-for-updates-on-startup', HTMLInputElement)
+const showChatBubblesInput = byId('show-chat-bubbles', HTMLInputElement)
+let chatPosition: 'right' | 'bottom' = 'right'
 const settingsDialog = byId('settings-dialog', HTMLDialogElement)
 const serverDialog = byId('server-dialog', HTMLDialogElement)
 const deleteDialog = byId('delete-dialog', HTMLDialogElement)
@@ -80,6 +83,9 @@ const roomSidebar = byId('room-sidebar', HTMLElement)
 const participantGrid = elementById('participant-grid')
 let savedConfig: AppConfig | null = null
 let joining = false
+// Session callbacks arrive before connect() resolves. Commit their state to
+// the room UI together, instead of painting a partially joined lobby.
+let joiningSession = false
 let publishing = false
 let sourcesRequest = 0
 let showStatistics = false
@@ -106,9 +112,13 @@ let screenControlsTimer: number | null = null
 let streamMetricsHovered = false
 const streamVolumes = new Map<string, number>()
 let roomPendingDeletion: string | null = null
+const chat = new RoomChat(sendChatMessage, makeAvatar, () => renderMembers())
 
 const hooks: SessionHooks = {
+  onRoomLost: () => chat.clearHistory(),
+  onChatMessage: (message) => chat.receive(message),
   onConnection: (state) => {
+    if (state === 'reconnecting' && connection !== 'reconnecting') chat.clearHistory()
     connection = state
     renderChrome()
   },
@@ -122,6 +132,7 @@ const hooks: SessionHooks = {
       return participant.id === previous.id && participant.name === previous.name && participant.local === previous.local
     })) return
     participants = ordered
+    if (!joiningSession) chat.setParticipants(ordered)
     renderMembers()
     renderChrome()
   },
@@ -174,6 +185,10 @@ async function boot(): Promise<void> {
 }
 
 function bind(): void {
+  for (const position of ['right', 'bottom'] as const) elementById(`chat-position-${position}`).addEventListener('click', () => {
+    chatPosition = position
+    syncChatSettings()
+  })
   createForm.addEventListener('submit', (event) => { event.preventDefault(); void onCreateRoom() })
   document.querySelectorAll<HTMLButtonElement>('[data-create-room]').forEach((button) => button.addEventListener('click', () => {
     clearNote(createNote)
@@ -321,6 +336,7 @@ async function refreshRooms(): Promise<void> {
   try {
     const listed = await window.sharescreen.listRooms()
     if (!listed.ok) {
+      chat.clearHistory()
       serverUnavailable = true
       rooms = []
       roomsFingerprint = ''
@@ -341,6 +357,7 @@ async function refreshRooms(): Promise<void> {
     }
   } catch (error) {
     serverUnavailable = true
+    chat.clearHistory()
     rooms = []
     roomsFingerprint = ''
     clearNote(listNote)
@@ -436,13 +453,25 @@ async function connect(roomName: string, role: Role): Promise<boolean> {
   const saved = await persistConfig(); if (!saved) return false
   const issued = await window.sharescreen.createToken({ role, displayName: saved.displayName, room: roomName })
   if (!issued.ok) { showNote(picker.open ? pickerNote : stageNote, issued.error, 'error'); return false }
+  joiningSession = true
+  const workspace = elementById('room-workspace')
+  workspace.inert = true
+  chat.setConnection(false)
+  const pendingMessages: Parameters<SessionHooks['onChatMessage']>[0][] = []
+  let chatReady = false
   try {
     await joinRoom({
       url: issued.value.url,
       token: issued.value.token,
       subscribe: false,
       media: { video, audioRack },
-      hooks,
+      hooks: {
+        ...hooks,
+        onChatMessage: (message) => {
+          if (chatReady) hooks.onChatMessage(message)
+          else pendingMessages.push(message)
+        },
+      },
       roster: async () => {
         const roster = await window.sharescreen.listRoomParticipants({ name: roomName })
         if (!roster.ok) throw new Error(roster.error)
@@ -450,9 +479,22 @@ async function connect(roomName: string, role: Role): Promise<boolean> {
       },
     })
   } catch (error) {
-    resetRoomState(); showNote(picker.open ? pickerNote : stageNote, messageOf(error), 'error'); renderChrome(); return false
+    workspace.inert = false
+    joiningSession = false
+    chat.clearHistory(); resetRoomState(); showNote(picker.open ? pickerNote : stageNote, messageOf(error), 'error'); renderChrome(); return false
   }
-  currentRoom = roomName; hideLocalPreview = false; clearNote(stageNote); renderRooms(); renderMembers(); renderChrome(); void refreshRooms(); return true
+  workspace.inert = false
+  joiningSession = false
+  currentRoom = roomName
+  hideLocalPreview = false
+  chat.begin(roomName, issued.value.url)
+  chat.setParticipants(participants)
+  clearNote(stageNote); renderRooms(); renderMembers(); renderChrome()
+  chatReady = true
+  pendingMessages.forEach((message) => chat.receive(message))
+  pendingMessages.length = 0
+  void refreshRooms()
+  return true
 }
 
 async function toggleFullscreen(): Promise<void> {
@@ -596,6 +638,7 @@ async function onLeave(): Promise<void> {
 function resetRoomState(): void {
   setTheater(false)
   currentRoom = null; connection = 'offline'; streams = []; participants = []; selectedStreamId = null; hideLocalPreview = false; gridView = false; telemetry = {}; lastGridSignature = ''; streamVolumes.clear(); hearButton.hidden = true
+  chat.reset()
 }
 
 function selectBestStream(): void {
@@ -604,12 +647,14 @@ function selectBestStream(): void {
 }
 
 function renderChrome(): void {
+  if (joiningSession) return
   const inRoom = currentRoom !== null
+  chat.setConnection(connection === 'connected' && inRoom)
   const localStream = streams.find((stream) => stream.local)
   const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
   document.body.classList.toggle('in-room', inRoom)
   roomSidebar.hidden = !inRoom
-  elementById('stage-head').hidden = !inRoom && !joining
+  elementById('stage-head').hidden = !inRoom
   roomTitle.textContent = inRoom ? currentRoom : 'Rooms'
   stage.classList.toggle('is-idle', !inRoom); shareButton.hidden = !inRoom; labelButton(shareButton, localStream ? 'Change screen' : 'Share screen'); hideMyScreenButton.hidden = !localStream
   shareButton.disabled = connection !== 'connected'
@@ -792,6 +837,7 @@ function compareParticipants(left: RoomParticipant, right: RoomParticipant): num
 }
 
 function renderMembers(): void {
+  if (joiningSession) return
   membersList.replaceChildren()
   membersPanel.hidden = currentRoom === null
   membersCount.textContent = String(participants.length)
@@ -811,6 +857,15 @@ function renderMembers(): void {
       member.append(live)
     }
     if (participant.local) member.title = 'You'
+    else {
+      const whisper = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-button member-whisper', innerHTML: icon('chat') })
+      whisper.dataset.whisper = participant.id
+      labelButton(whisper, `Whisper to ${participant.name}`)
+      const unread = chat.unreadFor(participant.id)
+      if (unread) whisper.append(Object.assign(document.createElement('span'), { className: 'chat-badge', textContent: unread > 99 ? '+99' : String(unread) }))
+      whisper.addEventListener('click', () => chat.whisper(participant.id))
+      member.append(whisper)
+    }
     membersList.append(member)
   }
 }
@@ -913,6 +968,7 @@ function readQuality(): ShareQuality | null {
 }
 
 function renderTelemetry(): void {
+  if (joiningSession) return
   const hasMetrics = Boolean(telemetry.sent || telemetry.received)
   const focusView = currentRoom !== null && !gridView && selectedStreamId !== null
   streamMetrics.hidden = !hasMetrics || !showStatistics || !focusView
@@ -997,18 +1053,25 @@ async function persistConfig(): Promise<AppConfig | null> {
     fillForm(saved.value); return saved.value
   } catch (error) { openServerSettings(); showNote(serverNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked } }
+function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, chatPosition, showChatBubbles: showChatBubblesInput.checked } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
   urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
   showStatistics = config.showStreamStatistics
   checkForUpdatesOnStartupInput.checked = config.checkForUpdatesOnStartup
   showStreamStatisticsInput.checked = showStatistics
+  chatPosition = config.chatPosition === 'bottom' ? 'bottom' : 'right'
+  showChatBubblesInput.checked = config.showChatBubbles === true
+  chat.configure(chatPosition, showChatBubblesInput.checked)
+  syncChatSettings()
   elementById('profile-name').textContent = config.displayName || 'Name'
   elementById('profile-avatar').textContent = initials(config.displayName)
   elementById('profile-avatar').style.setProperty('--avatar-hue', String(avatarHue(config.displayName)))
 }
 function openSettings(): void { clearNote(settingsNote); if (!settingsDialog.open) settingsDialog.showModal() }
+function syncChatSettings(): void {
+  for (const position of ['right', 'bottom']) elementById(`chat-position-${position}`).setAttribute('aria-pressed', String(chatPosition === position))
+}
 function openServerSettings(): void { clearNote(serverNote); if (!serverDialog.open) serverDialog.showModal() }
 function syncScreenControlsVisibility(hasVideo: boolean): void {
   if (!hasVideo) {

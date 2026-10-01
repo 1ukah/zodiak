@@ -21,10 +21,12 @@
       <div class="sidebar-spacer"></div>
       <footer class="profile-bar"><span id="profile-avatar" class="avatar">?</span><div class="profile-copy"><strong id="profile-name"></strong></div><button class="icon-button" data-settings title="Settings" aria-label="Settings"><span data-icon="settings"></span></button></footer>
     </aside>
+    <div id="room-workspace">
     <main id="stage-wrap">
       <header id="stage-head">
         <span class="room-heading-icon" data-icon="monitor"></span><div class="room-heading"><h1 id="room-title">Rooms</h1></div>
         <div class="header-actions">
+          <button id="chat-toggle" class="icon-button chat-toggle" type="button" title="Hide chat" aria-label="Hide chat" aria-controls="chat-panel" aria-expanded="true" hidden><span data-icon="chat"></span><span class="chat-badge" hidden></span></button>
           <button id="grid-view" class="icon-button" type="button" title="Grid view" aria-label="Grid view" hidden><span data-icon="rooms"></span></button>
           <button id="pop-out" class="icon-button" type="button" title="Pop out" aria-label="Pop out" hidden><span data-icon="popout"></span></button>
           <button id="fullscreen" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button>
@@ -48,7 +50,15 @@
         </div>
       </footer>
     </main>
+    <aside id="chat-panel" aria-label="Room chat" hidden>
+      <header class="chat-header"><div id="chat-tabs" role="tablist" aria-label="Conversations"></div><button id="chat-hide" class="icon-button" type="button" title="Hide chat" aria-label="Hide chat"><span data-icon="close"></span></button></header>
+      <div class="chat-history"><div id="chat-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div><button id="chat-jump" class="control-button" type="button" title="Jump to new messages" aria-label="Jump to new messages" hidden><span data-icon="down"></span><span class="chat-badge" hidden></span></button></div>
+      <form id="chat-form"><p id="chat-error" class="note" role="alert" hidden></p><div class="chat-composer"><textarea id="chat-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="chat-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div></form>
+    </aside>
+    <button id="chat-focus-toggle" class="control-button chat-toggle" type="button" title="Show chat" aria-label="Show chat" aria-controls="chat-panel" hidden><span data-icon="chat"></span><span class="chat-badge" hidden></span></button>
+    </div>
   </div>
+  <div id="chat-bubbles" aria-label="Chat previews"></div>
   <dialog id="create-dialog" class="dialog small-dialog" aria-labelledby="create-title">
     <form id="create-form" class="dialog-content">
       <div class="panel-head"><h2 id="create-title">New room</h2><button class="icon-button" type="button" data-close="create-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
@@ -65,6 +75,10 @@
         <label class="field audio-volume" for="audio-volume"><span class="volume-heading"><span data-icon="volume"></span><output id="audio-volume-value" for="audio-volume">100%</output></span><input id="audio-volume" type="range" min="0" max="200" value="100" title="Global incoming audio volume" aria-label="Global incoming audio volume" /></label><p id="audio-output-note" class="quality-note" role="status" hidden></p>
       </section>
       <label class="check" for="show-stream-statistics"><span>Stream statistics</span><input id="show-stream-statistics" type="checkbox" role="switch" title="Show host and viewer stream statistics" /></label>
+      <section class="settings-section chat-settings" aria-label="Chat">
+        <div class="chat-position-row"><span data-icon="chat" title="Chat position"></span><div role="group" aria-label="Chat position"><button id="chat-position-right" class="icon-button" type="button" title="Chat on the right" aria-label="Chat on the right" aria-pressed="true"><span data-icon="chat-right"></span></button><button id="chat-position-bottom" class="icon-button" type="button" title="Chat at the bottom" aria-label="Chat at the bottom" aria-pressed="false"><span data-icon="chat-bottom"></span></button></div></div>
+        <label class="check" for="show-chat-bubbles"><span>Show chat bubbles</span><input id="show-chat-bubbles" type="checkbox" role="switch" title="Preview messages while chat is hidden" /></label>
+      </section>
       <label class="check" for="check-for-updates-on-startup"><span>Check for updates on startup</span><input id="check-for-updates-on-startup" type="checkbox" role="switch" title="Check GitHub Releases for a newer zodiak version when the app opens" /></label>
       <button id="check-for-updates" class="update-check-button" type="button" title="Check for updates now">Check for updates now</button>
       <p id="settings-note" class="note" role="alert" hidden></p><div class="actions"><button id="save-settings" class="primary icon-action" title="Save" aria-label="Save settings"><span data-icon="check"></span></button></div>
