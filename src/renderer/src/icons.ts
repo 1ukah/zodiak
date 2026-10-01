@@ -2,7 +2,7 @@ import {
   ArrowRight, Check, Eye, EyeOff, Headphones, LayoutGrid,
   LoaderCircle, LogOut, Maximize, Monitor, MonitorUp, PanelLeftClose,
   PictureInPicture2, Plus, RotateCw, Search, Server, Settings, Square, Users,
-  Volume2, VolumeX, X, createElement, type IconNode,
+  Volume2, VolumeX, X, MessageCircle, Send, PanelRight, PanelBottom, Hash, LockKeyhole, ArrowDown, ExternalLink, Play, createElement, type IconNode,
 } from 'lucide'
 
 const icons: Record<string, IconNode> = {
@@ -13,6 +13,8 @@ const icons: Record<string, IconNode> = {
   eye: Eye, 'eye-off': EyeOff, stop: Square, leave: LogOut, close: X,
   refresh: RotateCw, arrow: ArrowRight, check: Check, volume: Volume2,
   'volume-off': VolumeX, loader: LoaderCircle,
+  chat: MessageCircle, send: Send, 'chat-right': PanelRight, 'chat-bottom': PanelBottom,
+  hash: Hash, private: LockKeyhole, down: ArrowDown, link: ExternalLink, play: Play,
 }
 
 export function icon(name: string): string {

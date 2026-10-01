@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, powerSaveBlocker, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, powerSaveBlocker, session, shell } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { channels, shareBitrateRangeFor, supportsShareQuality, type CaptureAccelerationStatus, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareResolution, type ShareStartRequest } from '../shared/types'
@@ -116,7 +116,15 @@ function createWindow(splash: BrowserWindow | null = null): void {
     event.preventDefault()
   })
 
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    // Chat links open in the user's browser; never navigate the app or launch
+    // file/custom protocols from a message.
+    try {
+      const link = new URL(url)
+      if (['https:', 'http:'].includes(link.protocol) && !link.username && !link.password) void shell.openExternal(link.href).catch(() => undefined)
+    } catch { /* Ignore malformed links. */ }
+    return { action: 'deny' }
+  })
   const notifyFullscreen = (active: boolean): void => {
     if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channels.windowFullscreenChanged, active)
   }

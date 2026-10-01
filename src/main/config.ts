@@ -13,6 +13,8 @@ const DEFAULT_CONFIG: AppConfig = {
   displayName: '',
   showStreamStatistics: false,
   checkForUpdatesOnStartup: true,
+  chatPosition: 'right',
+  showChatBubbles: false,
 }
 
 export interface ResolvedServer {
@@ -88,6 +90,8 @@ export function validateConfig(value: unknown): AppConfig {
     displayName: optionalDisplayName(value.displayName),
     showStreamStatistics: value.showStreamStatistics === true,
     checkForUpdatesOnStartup: value.checkForUpdatesOnStartup !== false,
+    chatPosition: value.chatPosition === 'bottom' ? 'bottom' : 'right',
+    showChatBubbles: value.showChatBubbles === true,
   }
 }
 
@@ -109,6 +113,8 @@ function normalizeStored(value: unknown): AppConfig {
     displayName: stringOr(record.displayName, '').trim(),
     showStreamStatistics: record.showStreamStatistics === true,
     checkForUpdatesOnStartup: record.checkForUpdatesOnStartup !== false,
+    chatPosition: record.chatPosition === 'bottom' ? 'bottom' : 'right',
+    showChatBubbles: record.showChatBubbles === true,
   }
 }
 

@@ -7,6 +7,8 @@ export interface AppConfig {
   displayName: string
   showStreamStatistics: boolean
   checkForUpdatesOnStartup: boolean
+  chatPosition: 'right' | 'bottom'
+  showChatBubbles: boolean
 }
 
 export interface RoomSummary {
