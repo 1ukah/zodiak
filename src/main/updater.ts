@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog } from 'electron'
 import electronUpdater, { type ProgressInfo, type UpdateInfo } from 'electron-updater'
-import { loadConfig } from './config'
+import { loadConfig, requireUpdateChannel } from './config'
+import { getUpdateFeed } from './update-feed'
+import type { UpdateChannel } from '../shared/types'
 
 const { autoUpdater } = electronUpdater
 
@@ -8,6 +10,8 @@ let getWindow: () => BrowserWindow | null = () => null
 let updateCheckInFlight = false
 let manualCheckRequested = false
 let downloadStarted = false
+let updatePromptOpen = false
+let activeChannel: UpdateChannel = 'stable'
 
 function activeWindow(): BrowserWindow | null {
   const win = getWindow()
@@ -27,31 +31,37 @@ function clearProgress(): void {
 }
 
 async function handleUpdateAvailable(info: UpdateInfo): Promise<void> {
-  const response = await showMessage({
-    type: 'info',
-    title: 'Update available',
-    message: `zodiak ${info.version} is available.`,
-    detail: 'Download the update now? It will be installed only after you choose to restart zodiak.',
-    buttons: ['Download', 'Later'],
-    defaultId: 0,
-    cancelId: 1,
-  })
-  if (response !== 0 || downloadStarted) return
-
-  downloadStarted = true
+  manualCheckRequested = false
+  updatePromptOpen = true
   try {
-    await autoUpdater.downloadUpdate()
-  } catch (error) {
-    clearProgress()
-    downloadStarted = false
-    console.warn('Could not download zodiak update:', error)
-    await showMessage({
-      type: 'error',
-      title: 'Update download failed',
-      message: 'zodiak could not download the update.',
-      detail: 'Check your internet connection and try again later.',
-      buttons: ['OK'],
+    const response = await showMessage({
+      type: 'info',
+      title: 'Update available',
+      message: `zodiak ${info.version} (${activeChannel === 'beta' ? 'Beta' : 'Stable'}) is available.`,
+      detail: 'Download the update now? It will be installed only after you choose to restart zodiak.',
+      buttons: ['Download', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
     })
+    if (response !== 0 || downloadStarted) return
+
+    downloadStarted = true
+    try {
+      await autoUpdater.downloadUpdate()
+    } catch (error) {
+      clearProgress()
+      downloadStarted = false
+      console.warn('Could not download zodiak update:', error)
+      await showMessage({
+        type: 'error',
+        title: 'Update download failed',
+        message: 'zodiak could not download the update.',
+        detail: 'Check your internet connection and try again later.',
+        buttons: ['OK'],
+      })
+    }
+  } finally {
+    updatePromptOpen = false
   }
 }
 
@@ -66,7 +76,7 @@ async function handleUpdateDownloaded(info: UpdateInfo): Promise<void> {
     defaultId: 0,
     cancelId: 1,
   })
-  if (response === 0) autoUpdater.quitAndInstall()
+  if (response === 0) autoUpdater.quitAndInstall(true, true)
 }
 
 /** Configures the packaged-app updater once Electron is ready. */
@@ -100,16 +110,26 @@ export function initializeUpdater(windowProvider: () => BrowserWindow | null): v
   autoUpdater.on('error', (error) => console.warn('zodiak updater error:', error))
 }
 
-export async function requestUpdateCheck(manual = false): Promise<void> {
+export async function requestUpdateCheck(manual = false, requestedChannel?: unknown): Promise<void> {
   if (!app.isPackaged) {
     if (manual) throw new Error('Updates are available only in an installed zodiak build')
     return
   }
-  if (updateCheckInFlight) return
+  if (updateCheckInFlight || updatePromptOpen || downloadStarted) {
+    if (manual) throw new Error('An update is already being checked, downloaded, or waiting to install. Finish it before checking another channel.')
+    return
+  }
 
   updateCheckInFlight = true
   manualCheckRequested ||= manual
   try {
+    activeChannel = requireUpdateChannel(requestedChannel ?? (await loadConfig()).updateChannel)
+    autoUpdater.channel = activeChannel === 'beta' ? 'beta' : 'latest'
+    autoUpdater.allowPrerelease = activeChannel === 'beta'
+    // Returning from Beta to Stable may require installing an older version.
+    // Never downgrade within Beta or between regular Stable releases.
+    autoUpdater.allowDowngrade = activeChannel === 'stable' && autoUpdater.currentVersion.prerelease[0] === 'beta'
+    autoUpdater.setFeedURL(await getUpdateFeed(activeChannel))
     await autoUpdater.checkForUpdates()
   } catch (error) {
     console.warn('Could not check for zodiak updates:', error)
@@ -118,17 +138,18 @@ export async function requestUpdateCheck(manual = false): Promise<void> {
         type: 'error',
         title: 'Update check failed',
         message: 'zodiak could not check for updates.',
-        detail: 'Check your internet connection and try again.',
+        detail: error instanceof Error ? error.message : 'Check your internet connection and try again.',
         buttons: ['OK'],
       })
     }
   } finally {
     updateCheckInFlight = false
+    manualCheckRequested = false
   }
 }
 
 /** Starts the optional startup check only after the main window is visible. */
 export async function checkForUpdatesOnStartup(): Promise<void> {
   const config = await loadConfig()
-  if (config.checkForUpdatesOnStartup) await requestUpdateCheck()
+  if (config.checkForUpdatesOnStartup) await requestUpdateCheck(false, config.updateChannel)
 }
