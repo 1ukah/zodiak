@@ -20,7 +20,13 @@
     "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-installer.ps1 -Publish",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:ui": "electron tests/ui-smoke.cjs",
+    "test:updater": "node tests/updater.cjs",
+    "test:installer": "dotnet run --project tests/installer-update/InstallerUpdateTests.csproj -c Release",
+    "test:chat": "node tests/chat-protocol.cjs && electron tests/chat-ui.cjs",
+    "test:chat:live": "electron tests/chat-live.cjs",
     "test:audio": "electron tests/audio-playback.cjs",
+    "test:voice": "electron tests/voice-session.cjs && electron tests/voice-ui.cjs",
+    "test:voice:live": "electron tests/voice-live.cjs",
     "test:startup": "npm run build && electron tests/startup-smoke.cjs"
   },
   "build": {

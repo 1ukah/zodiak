@@ -11,8 +11,27 @@ $payloadDirectory = Join-Path $projectRoot 'native/installer-shell/Payload'
 $assetsDirectory = Join-Path $projectRoot 'native/installer-shell/Assets'
 $shellOutput = Join-Path $projectRoot 'native/installer-shell/publish/zodiak-setup.exe'
 $publicInstaller = Join-Path $projectRoot 'dist/zodiak-setup.exe'
-$updateManifest = Join-Path $projectRoot 'dist/latest.yml'
 $displayVersion = (Get-Content (Join-Path $projectRoot 'VERSION') -Raw).Trim()
+$isBeta = $displayVersion -match '^\d+\.\d+\.\d+-beta(?:\.\d+)*$'
+if (-not $isBeta -and $displayVersion -notmatch '^\d+\.\d+\.\d+$') {
+  throw 'Use a stable VERSION (1.2.0) or a beta VERSION (1.2.0-beta).'
+}
+$releaseBranch = if ($isBeta) { 'beta' } else { 'master' }
+$manifestName = if ($isBeta) { 'beta.yml' } else { 'latest.yml' }
+$updateManifest = Join-Path $projectRoot "dist/$manifestName"
+$assemblyVersion = $displayVersion.Split('-')[0]
+
+if ($Publish) {
+  # A tag existing on GitHub must identify the exact source being packaged.
+  & git -C $projectRoot fetch origin $releaseBranch --tags
+  if ($LASTEXITCODE -ne 0) { throw 'Could not fetch the release branch and tags.' }
+  & git -C $projectRoot merge-base --is-ancestor HEAD "origin/$releaseBranch"
+  if ($LASTEXITCODE -ne 0) { throw "Publish $displayVersion from the $releaseBranch branch." }
+  $tagCommit = & git -C $projectRoot rev-parse "refs/tags/v$displayVersion^{commit}"
+  if ($LASTEXITCODE -ne 0) { throw "Push tag v$displayVersion before publishing." }
+  $sourceCommit = & git -C $projectRoot rev-parse HEAD
+  if ($tagCommit -ne $sourceCommit) { throw "Tag v$displayVersion must match the source being packaged." }
+}
 
 Push-Location $projectRoot
 try {
@@ -32,7 +51,7 @@ try {
   Copy-Item -LiteralPath (Join-Path $projectRoot 'build/logo.png') -Destination (Join-Path $assetsDirectory 'logo.png') -Force
   Copy-Item -LiteralPath (Join-Path $projectRoot 'build/icon.ico') -Destination (Join-Path $assetsDirectory 'zodiak.ico') -Force
 
-  dotnet publish $shellProject -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version=$displayVersion -p:InformationalVersion=$displayVersion -o (Join-Path $projectRoot 'native/installer-shell/publish')
+  dotnet publish $shellProject -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version=$displayVersion -p:AssemblyVersion=$assemblyVersion -p:FileVersion=$assemblyVersion -p:InformationalVersion=$displayVersion -o (Join-Path $projectRoot 'native/installer-shell/publish')
   Copy-Item -LiteralPath $shellOutput -Destination $publicInstaller -Force
 
   $version = (Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
@@ -72,7 +91,10 @@ releaseDate: '$releaseDate'
       $releaseExists = $false
     }
     if (-not $releaseExists) {
-      & gh release create $tag --title $tag --generate-notes
+      # Keep a new release hidden until both the installer and manifest exist.
+      $createArguments = @('release', 'create', $tag, '--title', $tag, '--generate-notes', '--draft', '--verify-tag', '--target', $releaseBranch)
+      if ($isBeta) { $createArguments += @('--prerelease', '--latest=false') }
+      & gh @createArguments
       if ($LASTEXITCODE -ne 0) {
         throw 'GitHub release creation failed.'
       }
@@ -81,6 +103,14 @@ releaseDate: '$releaseDate'
     if ($LASTEXITCODE -ne 0) {
       throw 'GitHub release upload failed.'
     }
+    $editArguments = @('release', 'edit', $tag, '--draft=false')
+    if ($isBeta) {
+      $editArguments += @('--prerelease=true', '--latest=false')
+    } else {
+      $editArguments += @('--prerelease=false', '--latest')
+    }
+    & gh @editArguments
+    if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }
   }
 }
 finally {

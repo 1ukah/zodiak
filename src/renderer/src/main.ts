@@ -1,6 +1,9 @@
 import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
-import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
+import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, sendChatMessage, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
 import { hydrateIcons, icon, labelButton } from './icons'
+import { RoomChat } from './chat'
+import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, setVoiceParticipantMuted } from './session'
+import type { VoiceState } from './voice'
 
 hydrateIcons()
 
@@ -18,8 +21,8 @@ const secretInput = byId('api-secret', HTMLInputElement)
 const roomTitle = byId('room-title', HTMLHeadingElement)
 const hearButton = byId('hear-audio', HTMLButtonElement)
 const fullscreenButton = byId('fullscreen', HTMLButtonElement)
+const fullscreenFocusButton = byId('fullscreen-focus', HTMLButtonElement)
 const popOutButton = byId('pop-out', HTMLButtonElement)
-const gridViewButton = byId('grid-view', HTMLButtonElement)
 const theaterButton = byId('theater', HTMLButtonElement)
 const shareButton = byId('share', HTMLButtonElement)
 const hideMyScreenButton = byId('hide-my-screen', HTMLButtonElement)
@@ -67,6 +70,15 @@ const audioVolumeValue = byId('audio-volume-value', HTMLOutputElement)
 const audioOutputNote = byId('audio-output-note', HTMLParagraphElement)
 const showStreamStatisticsInput = byId('show-stream-statistics', HTMLInputElement)
 const checkForUpdatesOnStartupInput = byId('check-for-updates-on-startup', HTMLInputElement)
+const updateChannelInput = byId('update-channel', HTMLSelectElement)
+const showChatBubblesInput = byId('show-chat-bubbles', HTMLInputElement)
+const voiceEnabledInput = byId('voice-enabled', HTMLInputElement)
+const voiceInput = byId('voice-input', HTMLSelectElement)
+const voiceInputNote = byId('voice-input-note', HTMLParagraphElement)
+const refreshVoiceInputButton = byId('refresh-voice-input', HTMLButtonElement)
+let voiceState: VoiceState = { enabled: true, muted: true, deafened: false, busy: false, participants: [] }
+const voiceInputVolume = byId('voice-input-volume', HTMLInputElement)
+const voiceInputVolumeValue = byId('voice-input-volume-value', HTMLOutputElement)
 const settingsDialog = byId('settings-dialog', HTMLDialogElement)
 const serverDialog = byId('server-dialog', HTMLDialogElement)
 const deleteDialog = byId('delete-dialog', HTMLDialogElement)
@@ -80,6 +92,9 @@ const roomSidebar = byId('room-sidebar', HTMLElement)
 const participantGrid = elementById('participant-grid')
 let savedConfig: AppConfig | null = null
 let joining = false
+// Session callbacks arrive before connect() resolves. Commit their state to
+// the room UI together, instead of painting a partially joined lobby.
+let joiningSession = false
 let publishing = false
 let sourcesRequest = 0
 let showStatistics = false
@@ -103,12 +118,16 @@ let selectedAudioOutput = 'default'
 let windowFullscreen = false
 let screenControlsVisible = false
 let screenControlsTimer: number | null = null
-let streamMetricsHovered = false
 const streamVolumes = new Map<string, number>()
 let roomPendingDeletion: string | null = null
+const chat = new RoomChat(sendChatMessage, makeAvatar, () => renderMembers())
 
 const hooks: SessionHooks = {
+  onVoice: (state) => { voiceState = state; syncVoiceUI() },
+  onRoomLost: () => chat.clearHistory(),
+  onChatMessage: (message) => chat.receive(message),
   onConnection: (state) => {
+    if (state === 'reconnecting' && connection !== 'reconnecting') chat.clearHistory()
     connection = state
     renderChrome()
   },
@@ -122,6 +141,7 @@ const hooks: SessionHooks = {
       return participant.id === previous.id && participant.name === previous.name && participant.local === previous.local
     })) return
     participants = ordered
+    if (!joiningSession) chat.setParticipants(ordered)
     renderMembers()
     renderChrome()
   },
@@ -166,6 +186,7 @@ async function boot(): Promise<void> {
   renderChrome()
   window.sharescreen.rendererReady()
   void loadAudioOutputs()
+  void loadVoiceInputs()
   void refreshRooms()
   // Room events keep an open room current instantly. The lobby poll is only a
   // fallback for other rooms and deliberately does not rebuild the video UI
@@ -174,6 +195,19 @@ async function boot(): Promise<void> {
 }
 
 function bind(): void {
+  const settingsTabs = [...settingsDialog.querySelectorAll<HTMLButtonElement>('[data-settings-tab]')]
+  settingsTabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => selectSettingsTab(tab.dataset.settingsTab!))
+    tab.addEventListener('keydown', (event) => {
+      const next = event.key === 'ArrowDown' ? (index + 1) % settingsTabs.length :
+        event.key === 'ArrowUp' ? (index + settingsTabs.length - 1) % settingsTabs.length :
+        event.key === 'Home' ? 0 : event.key === 'End' ? settingsTabs.length - 1 : -1
+      if (next < 0) return
+      event.preventDefault()
+      settingsTabs[next].click()
+      settingsTabs[next].focus()
+    })
+  })
   createForm.addEventListener('submit', (event) => { event.preventDefault(); void onCreateRoom() })
   document.querySelectorAll<HTMLButtonElement>('[data-create-room]').forEach((button) => button.addEventListener('click', () => {
     clearNote(createNote)
@@ -194,6 +228,10 @@ function bind(): void {
       const previousName = savedConfig?.displayName
       const saved = await persistConfig()
       if (!saved) return
+      if (currentRoom) {
+        try { await configureVoice({ enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume }) }
+        catch (error) { showNote(settingsNote, `Settings saved. ${messageOf(error)}`, 'error'); return }
+      }
       if (currentRoom && saved.displayName !== previousName) {
         try {
           await updateDisplayName(saved.displayName)
@@ -217,7 +255,8 @@ function bind(): void {
     const button = byId('check-for-updates', HTMLButtonElement)
     button.disabled = true
     try {
-      const result = await window.sharescreen.checkForUpdates()
+      clearNote(settingsNote)
+      const result = await window.sharescreen.checkForUpdates(updateChannelInput.value === 'beta' ? 'beta' : 'stable')
       if (!result.ok) showNote(settingsNote, result.error, 'error')
     } finally { button.disabled = false }
   })
@@ -229,11 +268,8 @@ function bind(): void {
   picker.addEventListener('cancel', (event) => { event.preventDefault(); if (!publishing) closePicker() })
   shareButton.addEventListener('click', () => void openPicker())
   fullscreenButton.addEventListener('click', () => void toggleFullscreen())
+  fullscreenFocusButton.addEventListener('click', () => void toggleFullscreen())
   popOutButton.addEventListener('click', () => void popOutVideo())
-  gridViewButton.addEventListener('click', () => {
-    gridView = !gridView
-    renderChrome()
-  })
   theaterButton.addEventListener('click', () => {
     setTheater(!document.body.classList.contains('theater'))
   })
@@ -248,14 +284,6 @@ function bind(): void {
   stageWrap.addEventListener('pointermove', revealScreenControls)
   stageWrap.addEventListener('pointerdown', revealScreenControls)
   stageWrap.addEventListener('focusin', revealScreenControls)
-  streamMetrics.addEventListener('pointerenter', () => {
-    streamMetricsHovered = true
-    revealScreenControls()
-  })
-  streamMetrics.addEventListener('pointerleave', () => {
-    streamMetricsHovered = false
-    revealScreenControls()
-  })
   video.addEventListener('click', () => {
     if (streams.length && participants.length > 1) { gridView = true; renderChrome() }
   })
@@ -286,13 +314,18 @@ function bind(): void {
   refreshButton.addEventListener('click', () => void loadSources())
   audioInput.addEventListener('change', syncSystemAudioControls)
   audioVolumeInput.addEventListener('input', syncAudioVolume)
+  voiceInputVolume.addEventListener('input', syncVoiceInputVolume)
   showStreamStatisticsInput.addEventListener('change', () => {
     showStatistics = showStreamStatisticsInput.checked
     renderTelemetry()
   })
   audioOutputInput.addEventListener('change', () => void onAudioOutputChanged())
   refreshAudioOutputButton.addEventListener('click', () => void loadAudioOutputs())
-  navigator.mediaDevices?.addEventListener?.('devicechange', () => void loadAudioOutputs())
+  refreshVoiceInputButton.addEventListener('click', () => void loadVoiceInputs())
+  voiceEnabledInput.addEventListener('change', syncVoiceSettings)
+  for (const id of ['voice-mute', 'voice-focus-mute']) elementById(id).addEventListener('click', () => void changeVoice(() => setVoiceMuted(!voiceState.muted)))
+  for (const id of ['voice-deafen', 'voice-focus-deafen']) elementById(id).addEventListener('click', () => void changeVoice(() => setVoiceDeafened(!voiceState.deafened)))
+  navigator.mediaDevices?.addEventListener?.('devicechange', () => { void loadAudioOutputs(); void loadVoiceInputs() })
   pickerForm.addEventListener('submit', (event) => { event.preventDefault(); void onGoLive() })
   cancelShareButton.addEventListener('click', closePicker)
   resolutionInput.addEventListener('change', syncQualityControls)
@@ -307,8 +340,10 @@ function bind(): void {
   })
   document.addEventListener('keydown', (event) => {
     if (stageWrap.contains(document.activeElement)) revealScreenControls()
-    if (event.key === 'Escape' && document.body.classList.contains('theater')) {
-      void exitFocusView()
+    if (event.key === 'Escape' && windowFullscreen) {
+      void toggleFullscreen()
+    } else if (event.key === 'Escape' && document.body.classList.contains('theater')) {
+      exitFocusView()
     }
   })
   window.addEventListener('beforeunload', () => { void window.sharescreen.setSharing(false); void leaveRoom() })
@@ -321,6 +356,7 @@ async function refreshRooms(): Promise<void> {
   try {
     const listed = await window.sharescreen.listRooms()
     if (!listed.ok) {
+      chat.clearHistory()
       serverUnavailable = true
       rooms = []
       roomsFingerprint = ''
@@ -341,6 +377,7 @@ async function refreshRooms(): Promise<void> {
     }
   } catch (error) {
     serverUnavailable = true
+    chat.clearHistory()
     rooms = []
     roomsFingerprint = ''
     clearNote(listNote)
@@ -436,13 +473,26 @@ async function connect(roomName: string, role: Role): Promise<boolean> {
   const saved = await persistConfig(); if (!saved) return false
   const issued = await window.sharescreen.createToken({ role, displayName: saved.displayName, room: roomName })
   if (!issued.ok) { showNote(picker.open ? pickerNote : stageNote, issued.error, 'error'); return false }
+  joiningSession = true
+  const workspace = elementById('room-workspace')
+  workspace.inert = true
+  chat.setConnection(false)
+  const pendingMessages: Parameters<SessionHooks['onChatMessage']>[0][] = []
+  let chatReady = false
   try {
     await joinRoom({
       url: issued.value.url,
       token: issued.value.token,
       subscribe: false,
+      voice: { enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume },
       media: { video, audioRack },
-      hooks,
+      hooks: {
+        ...hooks,
+        onChatMessage: (message) => {
+          if (chatReady) hooks.onChatMessage(message)
+          else pendingMessages.push(message)
+        },
+      },
       roster: async () => {
         const roster = await window.sharescreen.listRoomParticipants({ name: roomName })
         if (!roster.ok) throw new Error(roster.error)
@@ -450,9 +500,22 @@ async function connect(roomName: string, role: Role): Promise<boolean> {
       },
     })
   } catch (error) {
-    resetRoomState(); showNote(picker.open ? pickerNote : stageNote, messageOf(error), 'error'); renderChrome(); return false
+    workspace.inert = false
+    joiningSession = false
+    chat.clearHistory(); resetRoomState(); showNote(picker.open ? pickerNote : stageNote, messageOf(error), 'error'); renderChrome(); return false
   }
-  currentRoom = roomName; hideLocalPreview = false; clearNote(stageNote); renderRooms(); renderMembers(); renderChrome(); void refreshRooms(); return true
+  workspace.inert = false
+  joiningSession = false
+  currentRoom = roomName
+  hideLocalPreview = false
+  chat.begin(roomName, issued.value.url)
+  chat.setParticipants(participants)
+  clearNote(stageNote); renderRooms(); renderMembers(); renderChrome()
+  chatReady = true
+  pendingMessages.forEach((message) => chat.receive(message))
+  pendingMessages.length = 0
+  void refreshRooms()
+  return true
 }
 
 async function toggleFullscreen(): Promise<void> {
@@ -469,13 +532,14 @@ async function toggleFullscreen(): Promise<void> {
 }
 
 function syncFullscreenLabel(): void {
-  labelButton(fullscreenButton, windowFullscreen ? 'Exit fullscreen' : 'Fullscreen')
+  for (const button of [fullscreenButton, fullscreenFocusButton]) {
+    labelButton(button, windowFullscreen ? 'Exit fullscreen' : 'Fullscreen')
+    button.innerHTML = icon(windowFullscreen ? 'collapse' : 'expand')
+    button.setAttribute('aria-pressed', String(windowFullscreen))
+  }
 }
 
-async function exitFocusView(): Promise<void> {
-  if (windowFullscreen) await toggleFullscreen()
-  else setTheater(false)
-}
+function exitFocusView(): void { setTheater(false) }
 
 async function popOutVideo(): Promise<void> {
   if (!streamGrid.hidden || !selectedStreamId) return showNote(stageNote, 'Choose a single stream before opening picture-in-picture.', 'warn')
@@ -596,6 +660,7 @@ async function onLeave(): Promise<void> {
 function resetRoomState(): void {
   setTheater(false)
   currentRoom = null; connection = 'offline'; streams = []; participants = []; selectedStreamId = null; hideLocalPreview = false; gridView = false; telemetry = {}; lastGridSignature = ''; streamVolumes.clear(); hearButton.hidden = true
+  chat.reset()
 }
 
 function selectBestStream(): void {
@@ -604,12 +669,15 @@ function selectBestStream(): void {
 }
 
 function renderChrome(): void {
+  syncVoiceUI()
+  if (joiningSession) return
   const inRoom = currentRoom !== null
+  chat.setConnection(connection === 'connected' && inRoom)
   const localStream = streams.find((stream) => stream.local)
   const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
   document.body.classList.toggle('in-room', inRoom)
   roomSidebar.hidden = !inRoom
-  elementById('stage-head').hidden = !inRoom && !joining
+  elementById('stage-head').hidden = !inRoom
   roomTitle.textContent = inRoom ? currentRoom : 'Rooms'
   stage.classList.toggle('is-idle', !inRoom); shareButton.hidden = !inRoom; labelButton(shareButton, localStream ? 'Change screen' : 'Share screen'); hideMyScreenButton.hidden = !localStream
   shareButton.disabled = connection !== 'connected'
@@ -621,14 +689,9 @@ function renderChrome(): void {
   const hasVideo = visibleStreams.some((stream) => stream.local || stream.subscribed)
   syncScreenControlsVisibility(hasVideo)
   fullscreenButton.hidden = !hasVideo
+  fullscreenFocusButton.hidden = !hasVideo
   popOutButton.hidden = !hasVideo || gridView
   const canUseGrid = streams.length > 0 && (participants.length > 1 || (hideLocalPreview && Boolean(localStream)))
-  // Unwatched streams only have available cards; there is nothing to focus
-  // yet. Keep that overview visible and do not offer a broken focus action.
-  const canToggleGrid = canUseGrid && hasVideo
-  gridViewButton.hidden = !canToggleGrid
-  labelButton(gridViewButton, gridView ? 'Focus selected stream' : 'Show all streams')
-  gridViewButton.setAttribute('aria-pressed', String(gridView))
   theaterButton.hidden = !hasVideo
   const useGrid = canUseGrid && (gridView || !hasVideo)
   popOutButton.hidden = !hasVideo || useGrid
@@ -734,20 +797,24 @@ function renderGrid(active: boolean): void {
         audioControls.addEventListener('pointerdown', (event) => event.stopPropagation())
         audioControls.addEventListener('click', (event) => event.stopPropagation())
         const volume = Object.assign(document.createElement('input'), { type: 'range', className: 'grid-tile-volume', min: '0', max: '100', value: String(Math.round((streamVolumes.get(stream.id) ?? 1) * 100)) })
+        volume.id = `stream-volume-${stream.id}`
         volume.setAttribute('aria-label', `Volume for ${stream.participantName}`)
         volume.title = `Volume for ${stream.participantName}: ${volume.value}%`
+        const volumeValue = Object.assign(document.createElement('output'), { className: 'grid-tile-volume-value', value: `${volume.value}%` })
+        volumeValue.setAttribute('for', volume.id)
         const updateVolume = (event: Event) => {
           event.stopPropagation()
           const value = Math.max(0, Math.min(100, Number((event.currentTarget as HTMLInputElement).value) || 0)) / 100
           streamVolumes.set(stream.id, value)
           const input = event.currentTarget as HTMLInputElement
           input.title = `Volume for ${stream.participantName}: ${Math.round(value * 100)}%`
+          volumeValue.value = `${Math.round(value * 100)}%`
           setStreamVolume(stream.id, value)
           if (stream.muted) setStreamMuted(stream.id, false)
         }
         volume.addEventListener('input', updateVolume)
         volume.addEventListener('click', (event) => event.stopPropagation())
-        audioControls.append(volume, mute)
+        audioControls.append(volume, volumeValue, mute)
         const hideControls = Object.assign(document.createElement('div'), { className: 'grid-stream-hide-control' })
         const hide = Object.assign(document.createElement('button'), { type: 'button', className: 'grid-tile-hide' })
         hide.innerHTML = icon('eye-off')
@@ -792,6 +859,7 @@ function compareParticipants(left: RoomParticipant, right: RoomParticipant): num
 }
 
 function renderMembers(): void {
+  if (joiningSession) return
   membersList.replaceChildren()
   membersPanel.hidden = currentRoom === null
   membersCount.textContent = String(participants.length)
@@ -803,6 +871,7 @@ function renderMembers(): void {
   })
   for (const participant of orderedParticipants) {
     const member = Object.assign(document.createElement('div'), { className: 'member' })
+    member.dataset.participantId = participant.id
     member.append(makeAvatar(participant.name))
     member.append(Object.assign(document.createElement('span'), { className: 'member-name', textContent: participant.name }))
     if (streams.some((stream) => stream.participantId === participant.id)) {
@@ -810,9 +879,124 @@ function renderMembers(): void {
       live.setAttribute('aria-label', `${participant.name} is sharing a screen`)
       member.append(live)
     }
+    const actions = Object.assign(document.createElement('div'), { className: `member-actions${participant.local ? ' member-actions-local' : ''}` })
+    actions.append(Object.assign(document.createElement('span'), { className: 'member-voice-status' }))
     if (participant.local) member.title = 'You'
+    else {
+      const mute = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-button member-voice-mute', innerHTML: icon('mic') })
+      mute.addEventListener('click', () => {
+        const state = voiceState.participants.find(person => person.id === participant.id)
+        setVoiceParticipantMuted(participant.id, !state?.locallyMuted)
+      })
+      actions.append(mute)
+      const whisper = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-button member-whisper', innerHTML: icon('chat') })
+      whisper.dataset.whisper = participant.id
+      labelButton(whisper, `Whisper to ${participant.name}`)
+      const unread = chat.unreadFor(participant.id)
+      if (unread) whisper.append(Object.assign(document.createElement('span'), { className: 'chat-badge', textContent: unread > 99 ? '+99' : String(unread) }))
+      whisper.addEventListener('click', () => chat.whisper(participant.id))
+      actions.append(whisper)
+    }
+    member.append(actions)
     membersList.append(member)
   }
+  syncVoiceUI()
+}
+
+function syncVoiceUI(): void {
+  const available = Boolean(currentRoom) && connection === 'connected' && voiceState.enabled
+  for (const id of ['voice-mute', 'voice-focus-mute']) {
+    const button = byId(id, HTMLButtonElement)
+    button.disabled = !available || voiceState.busy || voiceState.deafened
+    button.classList.toggle('is-muted', voiceState.muted)
+    button.innerHTML = icon(voiceState.muted ? 'mic-off' : 'mic')
+    button.setAttribute('aria-pressed', String(voiceState.muted))
+    labelButton(button, !voiceState.enabled ? 'Voice chat disabled in settings' : voiceState.deafened ? 'Microphone muted while deafened' : voiceState.muted ? 'Unmute microphone' : 'Mute microphone')
+  }
+  for (const id of ['voice-deafen', 'voice-focus-deafen']) {
+    const button = byId(id, HTMLButtonElement)
+    button.disabled = !available || voiceState.busy
+    button.classList.toggle('is-muted', voiceState.deafened)
+    button.innerHTML = icon(voiceState.deafened ? 'headphones-off' : 'headphones')
+    button.setAttribute('aria-pressed', String(voiceState.deafened))
+    labelButton(button, !voiceState.enabled ? 'Voice chat disabled in settings' : voiceState.deafened ? 'Undeafen' : 'Deafen')
+  }
+  for (const member of membersList.querySelectorAll<HTMLElement>('[data-participant-id]')) {
+    const state = voiceState.participants.find(person => person.id === member.dataset.participantId)
+    const name = member.querySelector('.member-name')!.textContent
+    member.classList.toggle('is-speaking', state?.speaking === true)
+    const status = member.querySelector<HTMLElement>('.member-voice-status')!
+    status.classList.toggle('voice-disabled', state?.enabled === false)
+    const signature = JSON.stringify([state?.muted, state?.deafened, state?.locallyMuted, state?.enabled])
+    if (status.dataset.signature !== signature) {
+      status.dataset.signature = signature
+      status.replaceChildren()
+      if (state && (state.muted || state.locallyMuted || !state.enabled)) {
+        const remote = !participants.find(person => person.id === member.dataset.participantId)?.local
+        const mic = Object.assign(document.createElement(remote ? 'button' : 'span'), { className: remote ? `voice-status-button${state.locallyMuted ? ' voice-local-muted' : ''}` : '', innerHTML: icon('mic-off') })
+        mic.title = state.locallyMuted ? `Unmute ${name} for you` : !state.enabled ? `${name} has voice chat disabled` : remote ? `Mute ${name} for you (microphone muted)` : `${name}'s microphone is muted`
+        mic.setAttribute('aria-label', mic.title)
+        if (mic instanceof HTMLButtonElement) {
+          mic.type = 'button'
+          mic.addEventListener('click', () => {
+            setVoiceParticipantMuted(member.dataset.participantId!, !state.locallyMuted)
+            const next = status.querySelector<HTMLButtonElement>('button') ?? member.querySelector<HTMLButtonElement>('.member-voice-mute')
+            next?.focus()
+          })
+        }
+        status.append(mic)
+      }
+      if (state && (state.deafened || !state.enabled)) {
+        const headphones = Object.assign(document.createElement('span'), { innerHTML: icon('headphones-off') })
+        headphones.title = state.enabled ? `${name} is deafened` : `${name} has voice chat disabled`
+        headphones.setAttribute('aria-label', headphones.title)
+        status.append(headphones)
+      }
+    }
+    const mute = member.querySelector<HTMLButtonElement>('.member-voice-mute')
+    const statusButton = status.querySelector<HTMLButtonElement>('button')
+    if (statusButton) statusButton.disabled = !available
+    if (mute) {
+      // The muted microphone status doubles as the local mute control. Avoid
+      // reserving a second invisible microphone slot before the whisper button.
+      mute.hidden = state?.muted === true || state?.locallyMuted === true || state?.enabled === false
+      mute.disabled = !available
+      mute.classList.toggle('voice-local-muted', state?.locallyMuted === true)
+      mute.innerHTML = icon(state?.locallyMuted ? 'mic-off' : 'mic')
+      mute.setAttribute('aria-pressed', String(state?.locallyMuted === true))
+      labelButton(mute, `${state?.locallyMuted ? 'Unmute' : 'Mute'} ${name} for you`)
+    }
+  }
+  const local = voiceState.participants.find(person => participants.some(participant => participant.local && participant.id === person.id))
+  elementById('profile-avatar').classList.toggle('is-speaking', local?.speaking === true)
+  elementById('profile-name').classList.toggle('is-speaking', local?.speaking === true)
+}
+
+async function changeVoice(action: () => Promise<void>): Promise<void> {
+  clearNote(stageNote)
+  try { await action(); void loadVoiceInputs() }
+  catch (error) { showNote(stageNote, messageOf(error), 'error') }
+}
+
+function syncVoiceSettings(): void {
+  voiceInputVolume.disabled = !voiceEnabledInput.checked
+  voiceInput.disabled = !voiceEnabledInput.checked
+  refreshVoiceInputButton.disabled = !voiceEnabledInput.checked
+}
+
+async function loadVoiceInputs(): Promise<void> {
+  if (!navigator.mediaDevices?.enumerateDevices) return
+  const selection = voiceInput.value || savedConfig?.voiceInputDeviceId || 'default'
+  try {
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(device => device.kind === 'audioinput')
+    voiceInput.replaceChildren(Object.assign(document.createElement('option'), { value: 'default', textContent: 'System default' }))
+    devices.filter(device => device.deviceId && device.deviceId !== 'default').forEach((device, index) => {
+      voiceInput.append(Object.assign(document.createElement('option'), { value: device.deviceId, textContent: device.label || `Microphone ${index + 1}` }))
+    })
+    if (![...voiceInput.options].some(option => option.value === selection)) voiceInput.append(Object.assign(document.createElement('option'), { value: selection, textContent: 'Unavailable microphone' }))
+    voiceInput.value = selection
+    voiceInputNote.hidden = true
+  } catch (error) { voiceInputNote.hidden = false; voiceInputNote.textContent = `Could not list microphones: ${messageOf(error)}` }
 }
 
 
@@ -913,10 +1097,10 @@ function readQuality(): ShareQuality | null {
 }
 
 function renderTelemetry(): void {
+  if (joiningSession) return
   const hasMetrics = Boolean(telemetry.sent || telemetry.received)
   const focusView = currentRoom !== null && !gridView && selectedStreamId !== null
   streamMetrics.hidden = !hasMetrics || !showStatistics || !focusView
-  if (streamMetrics.hidden) streamMetricsHovered = false
   renderMetricCard(hostMetrics, telemetry.sent, 'host')
   renderMetricCard(viewerMetrics, telemetry.received, 'viewer')
 }
@@ -997,18 +1181,47 @@ async function persistConfig(): Promise<AppConfig | null> {
     fillForm(saved.value); return saved.value
   } catch (error) { openServerSettings(); showNote(serverNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked } }
+function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: updateChannelInput.value === 'beta' ? 'beta' : 'stable', showChatBubbles: showChatBubblesInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100 } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
   urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
   showStatistics = config.showStreamStatistics
   checkForUpdatesOnStartupInput.checked = config.checkForUpdatesOnStartup
+  updateChannelInput.value = config.updateChannel === 'beta' ? 'beta' : 'stable'
   showStreamStatisticsInput.checked = showStatistics
+  showChatBubblesInput.checked = config.showChatBubbles === true
+  voiceEnabledInput.checked = config.voiceEnabled !== false
+  const inputDeviceId = config.voiceInputDeviceId || 'default'
+  if (![...voiceInput.options].some(option => option.value === inputDeviceId)) voiceInput.append(Object.assign(document.createElement('option'), { value: inputDeviceId, textContent: 'Saved microphone' }))
+  voiceInput.value = inputDeviceId
+  voiceInputVolume.value = String(Math.round((config.voiceInputVolume ?? 1) * 100))
+  syncVoiceInputVolume()
+  syncVoiceSettings()
+  chat.configure(showChatBubblesInput.checked)
   elementById('profile-name').textContent = config.displayName || 'Name'
   elementById('profile-avatar').textContent = initials(config.displayName)
   elementById('profile-avatar').style.setProperty('--avatar-hue', String(avatarHue(config.displayName)))
 }
-function openSettings(): void { clearNote(settingsNote); if (!settingsDialog.open) settingsDialog.showModal() }
+function openSettings(): void {
+  clearNote(settingsNote)
+  selectSettingsTab('account')
+  if (!settingsDialog.open) settingsDialog.showModal()
+  void loadVoiceInputs()
+}
+function selectSettingsTab(name: string): void {
+  settingsDialog.querySelectorAll<HTMLButtonElement>('[data-settings-tab]').forEach(tab => {
+    const selected = tab.dataset.settingsTab === name
+    tab.setAttribute('aria-selected', String(selected))
+    tab.tabIndex = selected ? 0 : -1
+    elementById(tab.getAttribute('aria-controls')!).hidden = !selected
+    if (selected) elementById('settings-section-title').textContent = tab.textContent!.trim()
+  })
+}
+function syncVoiceInputVolume(): void {
+  const value = Math.max(0, Math.min(100, Number(voiceInputVolume.value)))
+  voiceInputVolumeValue.value = `${value}%`
+  setVoiceInputVolume(value / 100)
+}
 function openServerSettings(): void { clearNote(serverNote); if (!serverDialog.open) serverDialog.showModal() }
 function syncScreenControlsVisibility(hasVideo: boolean): void {
   if (!hasVideo) {
@@ -1033,10 +1246,6 @@ function revealScreenControls(): void {
 
 function hideScreenControls(): void {
   screenControlsTimer = null
-  if (streamMetricsHovered && !streamMetrics.hidden) {
-    revealScreenControls()
-    return
-  }
   stageWrap.classList.add('screen-controls-idle')
 }
 
