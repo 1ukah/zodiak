@@ -2,10 +2,13 @@ const { contextBridge } = require('electron')
 let config = { url: 'ws://localhost:7880', apiKey: 'test', apiSecret: 'test', displayName: 'Alex Morgan', showStreamStatistics: false, checkForUpdatesOnStartup: true, voiceEnabled: true, voiceInputDeviceId: 'default', voiceInputVolume: 1, chatPosition: 'bottom' }
 let rooms = [{ name: 'the-lounge', participants: 3, sharing: false }, { name: 'watch-party', participants: 2, sharing: true }, { name: 'after-hours', participants: 0, sharing: false }]
 let serverAvailable = true
+let lastUpdateChannel = null
 const ok = value => Promise.resolve({ ok: true, value })
 contextBridge.exposeInMainWorld('sharescreen', {
   rendererReady() {}, getConfig: () => Promise.resolve(config),
   saveConfig: next => { config = next; return ok(config) },
+  checkForUpdates: channel => { lastUpdateChannel = channel; return ok(true) },
+  getTestUpdateChannel: () => Promise.resolve(lastUpdateChannel),
   listRooms: () => serverAvailable ? ok(rooms) : Promise.resolve({ ok: false, error: 'Server unavailable' }), setTestServerAvailable: value => { serverAvailable = Boolean(value) }, createRoom: ({ name }) => { const room = { name, participants: 0, sharing: false }; rooms.push(room); return ok(room) },
   listRoomParticipants: () => ok([{ id: 'me', name: config.displayName }, { id: 'sam', name: 'Sam Rivera' }, { id: 'jo', name: 'Jordan Lee' }]),
   deleteRoom: ({ name }) => { rooms = rooms.filter(r => r.name !== name); return ok(true) },

@@ -266,8 +266,8 @@ function captureAccelerationStatus(): CaptureAccelerationStatus {
 function registerIpc(): void {
   ipcMain.handle(channels.getConfig, () => loadConfig())
   ipcMain.handle(channels.saveConfig, (_event, payload: unknown) => settle(() => saveConfig(payload)))
-  ipcMain.handle(channels.checkForUpdates, () => settle(async () => {
-    await requestUpdateCheck(true)
+  ipcMain.handle(channels.checkForUpdates, (_event, channel: unknown) => settle(async () => {
+    await requestUpdateCheck(true, channel)
     return true as const
   }))
   ipcMain.handle(channels.createToken, (_event, payload: unknown) => settle(() => createParticipantToken(payload)))

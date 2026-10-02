@@ -70,6 +70,7 @@ const audioVolumeValue = byId('audio-volume-value', HTMLOutputElement)
 const audioOutputNote = byId('audio-output-note', HTMLParagraphElement)
 const showStreamStatisticsInput = byId('show-stream-statistics', HTMLInputElement)
 const checkForUpdatesOnStartupInput = byId('check-for-updates-on-startup', HTMLInputElement)
+const updateChannelInput = byId('update-channel', HTMLSelectElement)
 const showChatBubblesInput = byId('show-chat-bubbles', HTMLInputElement)
 const voiceEnabledInput = byId('voice-enabled', HTMLInputElement)
 const voiceInput = byId('voice-input', HTMLSelectElement)
@@ -254,7 +255,8 @@ function bind(): void {
     const button = byId('check-for-updates', HTMLButtonElement)
     button.disabled = true
     try {
-      const result = await window.sharescreen.checkForUpdates()
+      clearNote(settingsNote)
+      const result = await window.sharescreen.checkForUpdates(updateChannelInput.value === 'beta' ? 'beta' : 'stable')
       if (!result.ok) showNote(settingsNote, result.error, 'error')
     } finally { button.disabled = false }
   })
@@ -1179,12 +1181,13 @@ async function persistConfig(): Promise<AppConfig | null> {
     fillForm(saved.value); return saved.value
   } catch (error) { openServerSettings(); showNote(serverNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, showChatBubbles: showChatBubblesInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100 } }
+function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: updateChannelInput.value === 'beta' ? 'beta' : 'stable', showChatBubbles: showChatBubblesInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100 } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
   urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
   showStatistics = config.showStreamStatistics
   checkForUpdatesOnStartupInput.checked = config.checkForUpdatesOnStartup
+  updateChannelInput.value = config.updateChannel === 'beta' ? 'beta' : 'stable'
   showStreamStatisticsInput.checked = showStatistics
   showChatBubblesInput.checked = config.showChatBubbles === true
   voiceEnabledInput.checked = config.voiceEnabled !== false

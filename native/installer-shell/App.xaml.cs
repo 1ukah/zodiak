@@ -13,7 +13,8 @@ public partial class App : System.Windows.Application
         {
             try
             {
-                var exitCode = await ZodiakInstaller.MainWindow.RunUpdateAsync();
+                var forceRunAfter = e.Args.Contains("--force-run", StringComparer.OrdinalIgnoreCase);
+                var exitCode = await ZodiakInstaller.MainWindow.RunUpdateAsync(forceRunAfter);
                 Shutdown(exitCode);
             }
             catch

@@ -135,16 +135,25 @@ public partial class MainWindow : Window
         return string.IsNullOrWhiteSpace(version) ? "" : version.Split('+')[0];
     }
 
-    internal static Task<int> RunUpdateAsync() => RunCoreInstallerAsync(string.Empty, false, true);
+    internal static Task<int> RunUpdateAsync(bool forceRunAfter) => RunCoreInstallerAsync(string.Empty, false, true, forceRunAfter);
 
-    private static async Task<int> RunCoreInstallerAsync(string installPath, bool allUsers, bool isUpdate)
+    private static string BuildCoreInstallerArguments(string installPath, bool allUsers, bool isUpdate, bool forceRunAfter)
+    {
+        if (isUpdate)
+        {
+            // NSIS launches the app after a silent install only with --force-run.
+            return forceRunAfter ? "--updated /S --force-run" : "--updated /S";
+        }
+
+        // NSIS parses /D from the rest of the raw command line, so it must
+        // be last and unquoted (including paths that contain spaces).
+        return $"--{(allUsers ? "allusers" : "currentuser")} /S /D={Path.GetFullPath(installPath)}";
+    }
+
+    private static async Task<int> RunCoreInstallerAsync(string installPath, bool allUsers, bool isUpdate, bool forceRunAfter = false)
     {
         var payloadPath = await ExtractCoreInstallerAsync();
-        var arguments = isUpdate
-            ? "--updated /S"
-            // NSIS parses /D from the rest of the raw command line, so it must
-            // be last and unquoted (including paths that contain spaces).
-            : $"--{(allUsers ? "allusers" : "currentuser")} /S /D={Path.GetFullPath(installPath)}";
+        var arguments = BuildCoreInstallerArguments(installPath, allUsers, isUpdate, forceRunAfter);
         var startInfo = new ProcessStartInfo(payloadPath, arguments)
         {
             UseShellExecute = allUsers,
