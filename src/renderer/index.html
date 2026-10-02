@@ -17,29 +17,32 @@
     </nav>
     <aside class="sidebar" id="room-sidebar" hidden>
       <p id="list-note" class="note" role="alert" hidden></p>
-      <section id="members-panel" aria-label="Connected people"><div class="members-heading"><span data-icon="people" title="Connected people"></span><span id="members-count"></span></div><div id="members-list"></div></section>
+      <section id="members-panel" aria-label="Connected people"><div class="members-heading"><span data-icon="people" title="Connected people"></span><span id="members-count"></span><button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button></div><div id="members-list"></div></section>
       <div class="sidebar-spacer"></div>
-      <footer class="profile-bar"><span id="profile-avatar" class="avatar">?</span><div class="profile-copy"><strong id="profile-name"></strong></div><button class="icon-button" data-settings title="Settings" aria-label="Settings"><span data-icon="settings"></span></button></footer>
+      <footer class="profile-bar"><span id="profile-avatar" class="avatar">?</span><div class="profile-copy"><strong id="profile-name"></strong></div><button id="voice-mute" class="icon-button voice-control" type="button" title="Unmute microphone" aria-label="Unmute microphone" aria-pressed="true"><span data-icon="mic-off"></span></button><button id="voice-deafen" class="icon-button voice-control" type="button" title="Deafen" aria-label="Deafen" aria-pressed="false"><span data-icon="headphones"></span></button><button class="icon-button" data-settings title="Settings" aria-label="Settings"><span data-icon="settings"></span></button></footer>
     </aside>
+    <div id="room-workspace">
     <main id="stage-wrap">
       <header id="stage-head">
         <span class="room-heading-icon" data-icon="monitor"></span><div class="room-heading"><h1 id="room-title">Rooms</h1></div>
         <div class="header-actions">
-          <button id="grid-view" class="icon-button" type="button" title="Grid view" aria-label="Grid view" hidden><span data-icon="rooms"></span></button>
           <button id="pop-out" class="icon-button" type="button" title="Pop out" aria-label="Pop out" hidden><span data-icon="popout"></span></button>
           <button id="fullscreen" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button>
-          <button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button>
+          <button id="chat-toggle" class="icon-button chat-toggle" type="button" title="Hide chat" aria-label="Hide chat" aria-controls="chat-panel" aria-expanded="true" hidden><span data-icon="chat"></span><span class="chat-badge" hidden></span></button>
         </div>
       </header>
       <div id="stage" class="is-idle">
         <video id="stage-video" autoplay playsinline muted></video><div id="stream-grid" aria-label="Live screen shares" hidden></div><div id="participant-grid" aria-label="Participants" hidden></div>
         <div id="waiting" role="status" aria-label="Select a room"><span data-icon="monitor"></span><p id="waiting-message" hidden></p></div>
         <button id="focused-stream-hide" class="focused-stream-hide" type="button" title="Hide selected stream" aria-label="Hide selected stream" hidden><span data-icon="eye-off"></span></button><div id="focused-stream-volume" class="focused-stream-volume" hidden><input id="focused-stream-volume-input" type="range" min="0" max="100" value="100" title="Selected stream volume" aria-label="Selected stream volume" /><output id="focused-stream-volume-value" for="focused-stream-volume-input">100%</output><button id="focused-stream-mute" class="focused-stream-mute" type="button" title="Mute selected stream" aria-label="Mute selected stream"><span data-icon="volume"></span></button></div>
-        <button id="exit-focus" class="control-button" title="Exit focus (Esc)" aria-label="Exit focus" hidden><span data-icon="focus"></span></button>
         <p id="stage-note" class="note" role="alert" hidden></p><aside id="stream-metrics" aria-label="Stream statistics" hidden><section id="host-metrics" class="metric-card" hidden><header><strong>Host</strong><span>Sending</span></header><dl></dl></section><section id="viewer-metrics" class="metric-card" hidden><header><strong>Viewer</strong><span>Receiving</span></header><dl></dl></section></aside>
       </div>
+      <button id="exit-focus" class="icon-button" title="Exit focus (Esc)" aria-label="Exit focus" hidden><span data-icon="focus"></span></button>
+      <div id="focus-view-controls" aria-label="Stream controls"><button id="fullscreen-focus" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button><button id="chat-focus-toggle" class="icon-button chat-toggle" type="button" title="Show chat" aria-label="Show chat" aria-controls="chat-panel" hidden><span data-icon="chat"></span><span class="chat-badge" hidden></span></button></div>
       <footer id="call-controls" hidden>
         <div class="call-actions">
+          <button id="voice-focus-mute" class="control-button voice-control voice-focus-control" type="button" title="Unmute microphone" aria-label="Unmute microphone" aria-pressed="true"><span data-icon="mic-off"></span></button>
+          <button id="voice-focus-deafen" class="control-button voice-control voice-focus-control" type="button" title="Deafen" aria-label="Deafen" aria-pressed="false"><span data-icon="headphones"></span></button>
           <button id="hear-audio" class="control-button" type="button" title="Enable audio" aria-label="Enable audio" hidden><span data-icon="volume"></span></button>
           <button id="hide-my-screen" class="control-button" type="button" title="Hide my screen" aria-label="Hide my screen" hidden><span data-icon="eye"></span></button>
           <button id="share" class="primary icon-action" type="button" title="Share screen" aria-label="Share screen" hidden><span data-icon="share"></span></button>
@@ -48,7 +51,14 @@
         </div>
       </footer>
     </main>
+    <aside id="chat-panel" aria-label="Room chat" hidden>
+      <header class="chat-header"><div id="chat-tabs" role="tablist" aria-label="Conversations"></div><button id="chat-hide" class="icon-button" type="button" title="Hide chat" aria-label="Hide chat"><span data-icon="close"></span></button></header>
+      <div class="chat-history"><div id="chat-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div><button id="chat-jump" class="control-button" type="button" title="Jump to new messages" aria-label="Jump to new messages" hidden><span data-icon="down"></span><span class="chat-badge" hidden></span></button></div>
+      <form id="chat-form"><p id="chat-error" class="note" role="alert" hidden></p><div class="chat-composer"><textarea id="chat-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="chat-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div></form>
+    </aside>
+    </div>
   </div>
+  <div id="chat-bubbles" aria-label="Chat previews"></div>
   <dialog id="create-dialog" class="dialog small-dialog" aria-labelledby="create-title">
     <form id="create-form" class="dialog-content">
       <div class="panel-head"><h2 id="create-title">New room</h2><button class="icon-button" type="button" data-close="create-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
@@ -57,17 +67,46 @@
     </form>
   </dialog>
   <dialog id="settings-dialog" class="dialog settings-dialog" aria-label="Settings">
-    <div class="dialog-content">
-      <div class="dialog-header-actions"><button class="icon-button" data-close="settings-dialog" title="Close" aria-label="Close settings"><span data-icon="close"></span></button></div>
-      <label class="field" for="display-name">Name<input id="display-name" type="text" maxlength="40" autocomplete="nickname" title="Updates your name in the current room" /></label>
-      <section class="settings-section" id="audio-controls" aria-label="Audio">
-        <div class="audio-output-row"><label class="field" for="audio-output">Output<select id="audio-output"><option value="default">System default</option></select></label><button id="refresh-audio-output" class="control-button" type="button" title="Refresh devices" aria-label="Refresh audio devices"><span data-icon="refresh"></span></button></div>
-        <label class="field audio-volume" for="audio-volume"><span class="volume-heading"><span data-icon="volume"></span><output id="audio-volume-value" for="audio-volume">100%</output></span><input id="audio-volume" type="range" min="0" max="200" value="100" title="Global incoming audio volume" aria-label="Global incoming audio volume" /></label><p id="audio-output-note" class="quality-note" role="status" hidden></p>
-      </section>
-      <label class="check" for="show-stream-statistics"><span>Stream statistics</span><input id="show-stream-statistics" type="checkbox" role="switch" title="Show host and viewer stream statistics" /></label>
-      <label class="check" for="check-for-updates-on-startup"><span>Check for updates on startup</span><input id="check-for-updates-on-startup" type="checkbox" role="switch" title="Check GitHub Releases for a newer zodiak version when the app opens" /></label>
-      <button id="check-for-updates" class="update-check-button" type="button" title="Check for updates now">Check for updates now</button>
-      <p id="settings-note" class="note" role="alert" hidden></p><div class="actions"><button id="save-settings" class="primary icon-action" title="Save" aria-label="Save settings"><span data-icon="check"></span></button></div>
+    <div class="settings-layout">
+      <nav class="settings-nav" aria-label="Settings categories">
+        <div role="tablist" aria-label="Settings" aria-orientation="vertical">
+          <button id="settings-tab-account" role="tab" aria-selected="true" aria-controls="settings-panel-account" tabindex="0" data-settings-tab="account"><span data-icon="account"></span>Account</button>
+          <button id="settings-tab-audio" role="tab" aria-selected="false" aria-controls="settings-panel-audio" tabindex="-1" data-settings-tab="audio"><span data-icon="headphones"></span>Audio</button>
+          <button id="settings-tab-interface" role="tab" aria-selected="false" aria-controls="settings-panel-interface" tabindex="-1" data-settings-tab="interface"><span data-icon="monitor"></span>Interface</button>
+          <button id="settings-tab-system" role="tab" aria-selected="false" aria-controls="settings-panel-system" tabindex="-1" data-settings-tab="system"><span data-icon="keyboard"></span>System</button>
+        </div>
+      </nav>
+      <div class="settings-main">
+        <header class="settings-header"><h2 id="settings-section-title">Account</h2><button class="icon-button" data-close="settings-dialog" title="Close" aria-label="Close settings"><span data-icon="close"></span></button></header>
+        <div class="settings-panels">
+          <section id="settings-panel-account" role="tabpanel" aria-labelledby="settings-tab-account" tabindex="0">
+            <label class="field" for="display-name">Name<input id="display-name" type="text" maxlength="40" autocomplete="nickname" title="Updates your name in the current room" /></label>
+          </section>
+          <section id="settings-panel-audio" role="tabpanel" aria-labelledby="settings-tab-audio" tabindex="0" hidden>
+            <div class="settings-section" id="audio-controls">
+              <div class="audio-output-row"><label class="field" for="audio-output">Output<select id="audio-output"><option value="default">System default</option></select></label><button id="refresh-audio-output" class="control-button" type="button" title="Refresh devices" aria-label="Refresh audio devices"><span data-icon="refresh"></span></button></div>
+              <label class="field audio-volume" for="audio-volume"><span class="volume-heading"><span>Output volume</span><output id="audio-volume-value" for="audio-volume">100%</output></span><input id="audio-volume" type="range" min="0" max="200" value="100" title="Global incoming audio volume" aria-label="Global incoming audio volume" /></label>
+              <p id="audio-output-note" class="quality-note" role="status" hidden></p>
+            </div>
+            <div class="settings-section voice-settings">
+              <div class="audio-output-row"><label class="field" for="voice-input">Input<select id="voice-input"><option value="default">System default</option></select></label><button id="refresh-voice-input" class="control-button" type="button" title="Refresh microphones" aria-label="Refresh microphones"><span data-icon="refresh"></span></button></div>
+              <label class="field audio-volume" for="voice-input-volume"><span class="volume-heading"><span>Input volume</span><output id="voice-input-volume-value" for="voice-input-volume">100%</output></span><input id="voice-input-volume" type="range" min="0" max="100" value="100" title="Microphone input volume" aria-label="Microphone input volume" /></label>
+              <p id="voice-input-note" class="quality-note" role="status" hidden></p>
+            </div>
+            <label class="check" for="voice-enabled"><span>Voice chat</span><input id="voice-enabled" type="checkbox" role="switch" checked title="Send and receive voice in the current room" /></label>
+          </section>
+          <section id="settings-panel-interface" role="tabpanel" aria-labelledby="settings-tab-interface" tabindex="0" hidden>
+            <label class="check" for="show-stream-statistics"><span>Stream statistics</span><input id="show-stream-statistics" type="checkbox" role="switch" title="Show host and viewer stream statistics" /></label>
+            <label class="check" for="show-chat-bubbles"><span>Show chat bubbles</span><input id="show-chat-bubbles" type="checkbox" role="switch" title="Preview messages while chat is hidden" /></label>
+          </section>
+          <section id="settings-panel-system" role="tabpanel" aria-labelledby="settings-tab-system" tabindex="0" hidden>
+            <label class="field" for="update-channel">Update channel<select id="update-channel"><option value="stable">Stable</option><option value="beta">Beta</option></select></label>
+            <label class="check" for="check-for-updates-on-startup"><span>Check for updates on startup</span><input id="check-for-updates-on-startup" type="checkbox" role="switch" title="Check GitHub Releases for a newer zodiak version when the app opens" /></label>
+            <button id="check-for-updates" class="update-check-button" type="button" title="Check for updates now">Check for updates now</button>
+          </section>
+        </div>
+        <footer class="settings-footer"><p id="settings-note" class="note" role="alert" hidden></p><button id="save-settings" class="primary icon-action" title="Save" aria-label="Save settings"><span data-icon="check"></span></button></footer>
+      </div>
     </div>
   </dialog>
   <dialog id="server-dialog" class="dialog server-dialog" aria-label="Server connection">

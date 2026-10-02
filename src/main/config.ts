@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { AppConfig } from '../shared/types'
+import type { AppConfig, UpdateChannel } from '../shared/types'
 import { isRecord } from './parse'
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -13,6 +13,11 @@ const DEFAULT_CONFIG: AppConfig = {
   displayName: '',
   showStreamStatistics: false,
   checkForUpdatesOnStartup: true,
+  updateChannel: 'stable',
+  showChatBubbles: false,
+  voiceEnabled: true,
+  voiceInputDeviceId: 'default',
+  voiceInputVolume: 1,
 }
 
 export interface ResolvedServer {
@@ -26,6 +31,16 @@ function configPath(): string {
 
 function stringOr(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback
+}
+
+function inputVolume(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1
+}
+
+export function requireUpdateChannel(value: unknown): UpdateChannel {
+  if (value === undefined || value === 'stable') return 'stable'
+  if (value === 'beta') return 'beta'
+  throw new Error('Update channel must be Stable or Beta')
 }
 
 export function resolveServer(input: string): ResolvedServer {
@@ -88,6 +103,11 @@ export function validateConfig(value: unknown): AppConfig {
     displayName: optionalDisplayName(value.displayName),
     showStreamStatistics: value.showStreamStatistics === true,
     checkForUpdatesOnStartup: value.checkForUpdatesOnStartup !== false,
+    updateChannel: requireUpdateChannel(value.updateChannel),
+    showChatBubbles: value.showChatBubbles === true,
+    voiceEnabled: value.voiceEnabled !== false,
+    voiceInputDeviceId: stringOr(value.voiceInputDeviceId, 'default').slice(0, 512) || 'default',
+    voiceInputVolume: inputVolume(value.voiceInputVolume),
   }
 }
 
@@ -109,6 +129,11 @@ function normalizeStored(value: unknown): AppConfig {
     displayName: stringOr(record.displayName, '').trim(),
     showStreamStatistics: record.showStreamStatistics === true,
     checkForUpdatesOnStartup: record.checkForUpdatesOnStartup !== false,
+    updateChannel: record.updateChannel === 'beta' ? 'beta' : 'stable',
+    showChatBubbles: record.showChatBubbles === true,
+    voiceEnabled: record.voiceEnabled !== false,
+    voiceInputDeviceId: stringOr(record.voiceInputDeviceId, 'default').slice(0, 512) || 'default',
+    voiceInputVolume: inputVolume(record.voiceInputVolume),
   }
 }
 

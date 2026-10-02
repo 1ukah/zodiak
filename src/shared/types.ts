@@ -1,4 +1,5 @@
 export type Role = 'publisher' | 'viewer'
+export type UpdateChannel = 'stable' | 'beta'
 
 export interface AppConfig {
   url: string
@@ -7,6 +8,11 @@ export interface AppConfig {
   displayName: string
   showStreamStatistics: boolean
   checkForUpdatesOnStartup: boolean
+  updateChannel: UpdateChannel
+  showChatBubbles: boolean
+  voiceEnabled: boolean
+  voiceInputDeviceId: string
+  voiceInputVolume: number
 }
 
 export interface RoomSummary {
@@ -138,7 +144,7 @@ export interface SharescreenApi {
   rendererReady: () => void
   getConfig: () => Promise<AppConfig>
   saveConfig: (config: AppConfig) => Promise<ActionResult<AppConfig>>
-  checkForUpdates: () => Promise<ActionResult<true>>
+  checkForUpdates: (channel?: UpdateChannel) => Promise<ActionResult<true>>
   createToken: (request: TokenRequest) => Promise<ActionResult<TokenResponse>>
   listRooms: () => Promise<ActionResult<RoomSummary[]>>
   listRoomParticipants: (request: RoomNameRequest) => Promise<ActionResult<RoomParticipantInfo[]>>
