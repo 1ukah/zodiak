@@ -16,4 +16,5 @@ contextBridge.exposeInMainWorld('sharescreen', {
   listSources: () => ok([{ id: 'screen:1', name: 'Entire screen', thumbnail: '' }, { id: 'window:1', name: 'Browser window', thumbnail: '' }]),
   prepareShare: () => ok(true), getCaptureAcceleration: () => Promise.resolve({ ready: true, videoEncode: 'enabled', videoDecode: 'enabled', compositing: 'enabled' }), setSharing: () => ok(true), startSystemAudio: () => ok(true), stopSystemAudio: () => ok(true), onSystemAudio: () => () => {},
   setWindowFullscreen: active => ok(Boolean(active)), onWindowFullscreenChanged: () => () => {},
+  onWindowVisibilityChanged: () => () => {},
 })

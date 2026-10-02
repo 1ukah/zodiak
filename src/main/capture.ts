@@ -17,7 +17,7 @@ export function registerCaptureHandler(): void {
       return
     }
     void desktopCapturer
-      .getSources({ types: ['screen', 'window'] })
+      .getSources({ types: [current.sourceId.startsWith('screen:') ? 'screen' : 'window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })
       .then((sources) => {
         const match = sources.find((source) => source.id === current.sourceId)
         if (!match) {

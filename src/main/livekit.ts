@@ -17,7 +17,8 @@ export async function connectServer(): Promise<LiveKitServer> {
   }
   const { signalUrl, apiUrl } = resolveServer(config.url)
   return {
-    client: new RoomServiceClient(apiUrl, config.apiKey, config.apiSecret),
+    // Abort the HTTP request before the outer user-facing deadline expires.
+    client: new RoomServiceClient(apiUrl, config.apiKey, config.apiSecret, { requestTimeout: 7 }),
     signalUrl,
     apiKey: config.apiKey,
     apiSecret: config.apiSecret,

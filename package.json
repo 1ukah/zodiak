@@ -25,6 +25,9 @@
     "test:chat": "node tests/chat-protocol.cjs && electron tests/chat-ui.cjs",
     "test:chat:live": "electron tests/chat-live.cjs",
     "test:audio": "electron tests/audio-playback.cjs",
+    "test:pcm": "node tests/system-audio-processor.cjs",
+    "test:telemetry": "electron tests/stream-telemetry.cjs",
+    "audit:performance": "npm run build && electron tests/performance-audit.cjs",
     "test:voice": "electron tests/voice-session.cjs && electron tests/voice-ui.cjs",
     "test:voice:live": "electron tests/voice-live.cjs",
     "test:startup": "npm run build && electron tests/startup-smoke.cjs"
@@ -51,6 +54,10 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "app-icon.ico"
+      },
       {
         "from": "build/icon.png",
         "to": "app-icon.png"

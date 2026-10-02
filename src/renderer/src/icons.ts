@@ -18,10 +18,21 @@ const icons: Record<string, IconNode> = {
   hash: Hash, private: LockKeyhole, down: ArrowDown, link: ExternalLink, play: Play,
 }
 
+const markup = new Map<string, string>()
 export function icon(name: string): string {
-  return createElement(icons[name] ?? Monitor, {
+  const cached = markup.get(name)
+  if (cached) return cached
+  const svg = createElement(icons[name] ?? Monitor, {
     class: 'icon', 'stroke-width': 1.75, 'aria-hidden': 'true', focusable: 'false',
   }).outerHTML
+  markup.set(name, svg)
+  return svg
+}
+
+export function setButtonIcon(button: HTMLElement, name: string): void {
+  if (button.dataset.renderedIcon === name) return
+  button.innerHTML = icon(name)
+  button.dataset.renderedIcon = name
 }
 
 export function hydrateIcons(): void {

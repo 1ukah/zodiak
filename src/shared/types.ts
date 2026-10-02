@@ -138,6 +138,7 @@ export const channels = {
   systemAudioData: 'audio:data',
   setWindowFullscreen: 'window:set-fullscreen',
   windowFullscreenChanged: 'window:fullscreen-changed',
+  windowVisibilityChanged: 'window:visibility-changed',
 } as const
 
 export interface SharescreenApi {
@@ -159,4 +160,5 @@ export interface SharescreenApi {
   onSystemAudio: (listener: (pcm: Uint8Array) => void) => () => void
   setWindowFullscreen: (active: boolean) => Promise<ActionResult<boolean>>
   onWindowFullscreenChanged: (listener: (active: boolean) => void) => () => void
+  onWindowVisibilityChanged: (listener: (visible: boolean) => void) => () => void
 }

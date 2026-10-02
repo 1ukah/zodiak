@@ -46,6 +46,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 [hidden] {
   display: none!important;
 }
+/* Hidden video elements let LiveKit's adaptive stream pause remote video while
+   the native window is minimized. Audio and outgoing sharing stay active. */
+.window-hidden #stage-wrap {
+  display: none!important;
+}
 button {
   display: inline-flex;
   align-items: center;

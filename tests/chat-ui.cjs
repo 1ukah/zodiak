@@ -19,7 +19,9 @@ const shot = async name => { await pause(180); await fs.writeFile(path.join(outp
 const timeout = setTimeout(() => { console.error('Chat UI test timed out'); app.exit(1) }, 60000)
 app.whenReady().then(async () => {
   await fs.mkdir(output, { recursive: true })
-  await build({ entryPoints: [path.join(root, 'src/renderer/src/main.ts')], bundle: true, format: 'esm', outfile: path.join(temp, 'main.js'), plugins: [{ name: 'test-session', setup(build) { build.onResolve({ filter: /^\.\/session$/ }, () => ({ path: path.join(root, 'tests/ui-session.ts') })) } }] })
+  // Initialize fixture controls before the deliberately deferred production
+  // transport so this test can hold/fail the very first room connection.
+  await build({ stdin: { contents: "import './tests/ui-session.ts'; import './src/renderer/src/main.ts'", resolveDir: root, loader: 'ts' }, bundle: true, format: 'esm', outfile: path.join(temp, 'main.js'), plugins: [{ name: 'test-session', setup(build) { build.onResolve({ filter: /^\.\/session$/ }, () => ({ path: path.join(root, 'tests/ui-session.ts') })) } }] })
   const html = (await fs.readFile(path.join(root, 'src/renderer/index.html'), 'utf8')).replace('/src/styles.css', './styles.css').replace('/src/main.ts', './main.js').replace('src="/logo.svg"', 'src="./logo.svg"')
   await fs.writeFile(path.join(temp, 'index.html'), html)
   await fs.copyFile(path.join(root, 'src/renderer/src/styles.css'), path.join(temp, 'styles.css'))

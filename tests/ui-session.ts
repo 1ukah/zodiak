@@ -60,6 +60,8 @@ export function setStreamVolume(id, volume) { state.streamVolume = volume }
 export function setStageVideoVisible() {}
 export function setStreamMuted(id, muted) { state.emitStreams(streams.map(s => s.id === id ? { ...s, muted } : s)) }
 export function supportsRemoteAudioOutputSelection() { return true }
+export function setTelemetryEnabled() {}
+export function setViewerVisible() {}
 export async function sendChatMessage(text, recipient) {
   if (state.failChat) throw new Error('Test send failed')
   const message = { version: 1, id: crypto.randomUUID(), text, timestamp: Date.now(), senderId: 'me', senderName: 'Alex Morgan', local: true, ...(recipient ? { recipient } : {}) }
