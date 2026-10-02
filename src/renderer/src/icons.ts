@@ -1,19 +1,20 @@
 import {
-  ArrowRight, Check, Eye, EyeOff, Headphones, LayoutGrid,
-  LoaderCircle, LogOut, Maximize, Monitor, MonitorUp, PanelLeftClose,
+  ArrowRight, Check, Eye, EyeOff, Headphones, HeadphoneOff, Mic, MicOff, LayoutGrid,
+  LoaderCircle, LogOut, Maximize, Minimize, Monitor, MonitorUp, PanelLeftClose,
   PictureInPicture2, Plus, RotateCw, Search, Server, Settings, Square, Users,
-  Volume2, VolumeX, X, MessageCircle, Send, PanelRight, PanelBottom, Hash, LockKeyhole, ArrowDown, ExternalLink, Play, createElement, type IconNode,
+  Volume2, VolumeX, X, MessageCircle, Send, UserRound, Keyboard, Hash, LockKeyhole, ArrowDown, ExternalLink, Play, createElement, type IconNode,
 } from 'lucide'
 
 const icons: Record<string, IconNode> = {
   monitor: Monitor, share: MonitorUp, rooms: LayoutGrid, plus: Plus,
   search: Search, settings: Settings, people: Users, headphones: Headphones,
   server: Server,
-  expand: Maximize, popout: PictureInPicture2, focus: PanelLeftClose,
+  mic: Mic, 'mic-off': MicOff, 'headphones-off': HeadphoneOff,
+  expand: Maximize, collapse: Minimize, popout: PictureInPicture2, focus: PanelLeftClose,
   eye: Eye, 'eye-off': EyeOff, stop: Square, leave: LogOut, close: X,
   refresh: RotateCw, arrow: ArrowRight, check: Check, volume: Volume2,
   'volume-off': VolumeX, loader: LoaderCircle,
-  chat: MessageCircle, send: Send, 'chat-right': PanelRight, 'chat-bottom': PanelBottom,
+  chat: MessageCircle, send: Send, account: UserRound, keyboard: Keyboard,
   hash: Hash, private: LockKeyhole, down: ArrowDown, link: ExternalLink, play: Play,
 }
 

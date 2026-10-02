@@ -13,8 +13,10 @@ const DEFAULT_CONFIG: AppConfig = {
   displayName: '',
   showStreamStatistics: false,
   checkForUpdatesOnStartup: true,
-  chatPosition: 'right',
   showChatBubbles: false,
+  voiceEnabled: true,
+  voiceInputDeviceId: 'default',
+  voiceInputVolume: 1,
 }
 
 export interface ResolvedServer {
@@ -28,6 +30,10 @@ function configPath(): string {
 
 function stringOr(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback
+}
+
+function inputVolume(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1
 }
 
 export function resolveServer(input: string): ResolvedServer {
@@ -90,8 +96,10 @@ export function validateConfig(value: unknown): AppConfig {
     displayName: optionalDisplayName(value.displayName),
     showStreamStatistics: value.showStreamStatistics === true,
     checkForUpdatesOnStartup: value.checkForUpdatesOnStartup !== false,
-    chatPosition: value.chatPosition === 'bottom' ? 'bottom' : 'right',
     showChatBubbles: value.showChatBubbles === true,
+    voiceEnabled: value.voiceEnabled !== false,
+    voiceInputDeviceId: stringOr(value.voiceInputDeviceId, 'default').slice(0, 512) || 'default',
+    voiceInputVolume: inputVolume(value.voiceInputVolume),
   }
 }
 
@@ -113,8 +121,10 @@ function normalizeStored(value: unknown): AppConfig {
     displayName: stringOr(record.displayName, '').trim(),
     showStreamStatistics: record.showStreamStatistics === true,
     checkForUpdatesOnStartup: record.checkForUpdatesOnStartup !== false,
-    chatPosition: record.chatPosition === 'bottom' ? 'bottom' : 'right',
     showChatBubbles: record.showChatBubbles === true,
+    voiceEnabled: record.voiceEnabled !== false,
+    voiceInputDeviceId: stringOr(record.voiceInputDeviceId, 'default').slice(0, 512) || 'default',
+    voiceInputVolume: inputVolume(record.voiceInputVolume),
   }
 }
 

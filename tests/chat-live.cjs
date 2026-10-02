@@ -62,7 +62,7 @@ app.whenReady().then(async () => {
     const issued = await createParticipantToken({ role:'viewer', displayName:name, room:index===3 ? otherRoom : roomName })
     const claims = JSON.parse(Buffer.from(issued.token.split('.')[1], 'base64url').toString())
     assert.equal(claims.video.canPublishData, true)
-    assert.deepEqual(claims.video.canPublishSources, ['screen_share','screen_share_audio'])
+    assert.deepEqual(claims.video.canPublishSources, ['screen_share','screen_share_audio','microphone'])
     const win = new BrowserWindow({ show:false, webPreferences:{contextIsolation:true,nodeIntegration:false,backgroundThrottling:false,offscreen:true} })
     windows.push(win); tokens.push(issued)
     await win.loadFile(path.join(temp,'index.html'))

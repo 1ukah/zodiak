@@ -41,7 +41,6 @@ export class RoomChat {
   private roomName: string | null = null
   private visible = true
   private connected = false
-  private position: 'right' | 'bottom' = 'right'
   private bubbles = false
   private sending = false
   private generation = 0
@@ -133,8 +132,8 @@ export class RoomChat {
     }
   }
 
-  configure(position: 'right' | 'bottom', bubbles: boolean): void {
-    this.position = position; this.bubbles = bubbles
+  configure(bubbles: boolean): void {
+    this.bubbles = bubbles
     if (!bubbles) this.clearBubbles()
     this.sync()
   }
@@ -226,7 +225,7 @@ export class RoomChat {
     this.panel.hidden = !open
     const workspace = el('room-workspace')
     workspace.classList.toggle('chat-open', open)
-    workspace.dataset.chatPosition = this.position
+    workspace.dataset.chatPosition = 'right'
     const unread = [...this.conversations.values()].reduce((sum, conversation) => sum + conversation.unread, 0)
     for (const id of ['chat-toggle', 'chat-focus-toggle']) {
       const button = el(id) as HTMLButtonElement
