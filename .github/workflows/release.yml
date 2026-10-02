@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Check out the tagged source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -31,12 +33,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Confirm tag matches VERSION
+      - name: Confirm tag matches VERSION and release branch
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
           if ($env:GITHUB_REF_NAME -ne "v$version") {
             throw "The pushed tag ($env:GITHUB_REF_NAME) must match VERSION (v$version)."
+          }
+          if ($version -match '^\d+\.\d+\.\d+-beta(?:\.\d+)*$') {
+            $releaseBranch = 'beta'
+          } elseif ($version -match '^\d+\.\d+\.\d+$') {
+            $releaseBranch = 'master'
+          } else {
+            throw 'Use a stable version (1.2.0) or a beta version (1.2.0-beta).'
+          }
+          git merge-base --is-ancestor HEAD "origin/$releaseBranch"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release $version must point to a commit on the $releaseBranch branch."
           }
 
       - name: Apply version to package metadata
