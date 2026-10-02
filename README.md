@@ -59,6 +59,14 @@ Voice checks: `npm run test:voice` verifies real WebRTC playback, microphone lif
 
 `npm run pack` creates the Windows installer at `dist/zodiak-setup.exe`. Building the installer also requires the .NET 8 SDK for the system-audio helper.
 
+## Update channels and releases
+
+In **Settings → System → Update channel**, choose **Stable** (the default) or **Beta**, then save. Startup checks use the saved channel. **Check for updates now** checks the currently selected channel, even before saving. Closing settings discards an unsaved channel change. Beta offers early features and may be less stable; switching back to Stable allows installing the stable version even if its version is older than the installed beta.
+
+Updates download built installers from GitHub Releases. Creating or pushing to a branch alone does not publish an update. Stable uses regular releases from `master`; Beta uses only `-beta` prereleases from `beta`, without falling back to a stable or alpha release.
+
+To publish, update `VERSION` on the appropriate branch, run `npm run version:sync`, commit, and push the matching tag. For example, use `1.2.0-beta` and tag `v1.2.0-beta` on `beta`, then `1.2.1-beta` / `v1.2.1-beta` for the next Beta update. When promoting it to Stable on `master`, use `1.2.1` / `v1.2.1`. Increase the version for each release. The release workflow verifies the tag against `VERSION` and the source branch, builds the installer, and publishes `latest.yml` for Stable or `beta.yml` for Beta. Beta releases are marked as prereleases and never replace the latest Stable release. The publication script requires an existing tag that matches the source being packaged.
+
 ## Screenshot
 
 <img width="1920" height="1032" alt="zodiak_NuQeg2SrVu" src="https://github.com/user-attachments/assets/cdd212d1-d369-40d7-b37e-89a909978273" />
