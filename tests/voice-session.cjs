@@ -100,9 +100,9 @@ window.voiceTest={setup, async add(id,source){remotes.set(id,await addRemote(id,
   remoteState(id,attrs,muted){Object.assign(remotes.get(id).participant.attributes,attrs);remotes.get(id).publication.isMuted=muted;room.emit(RoomEvent.ParticipantAttributesChanged);room.emit(RoomEvent.TrackMuted)},
   failMic(value){failMic=value}, failDevice(value){failDevice=value}, hold(){hold=true}, release(){hold=false;release?.()},
   startUnmute(){window.unmute=voice.setMuted(false).catch(error=>error.message)},close(){voice.close()},
-  reconnect(){room.emit(RoomEvent.Reconnected)},
+  reconnect(){room.emit(RoomEvent.Reconnected)},resume:()=>voice.resume(),
   snapshot(){return {state:states.at(-1), attributes:local.attributes,subscriptions,inputDeviceId:voice.inputDeviceId,
-    elements:[...voice.audio].map(([id,{element}])=>({id,muted:element.muted,playing:!element.paused})),
+    elements:[...voice.audio].map(([id,{element,receiver}])=>({id,muted:element.muted,playing:!element.paused,receiverMuted:receiver.muted,receiverVolume:receiver.volume})),
     activeCaptures:[...new Set(captured)].filter(track=>track.readyState==='live').length,blocked}}
 };
 `
@@ -135,6 +135,8 @@ app.whenReady().then(async () => {
   await new Promise(resolve=>setTimeout(resolve,500))
   assert.deepEqual((await snapshot()).elements.map(el=>el.id),['bob'])
   assert((await snapshot()).elements[0].playing)
+  assert((await snapshot()).elements[0].receiverMuted, 'The WebRTC decoder must stay muted so voice has only one audible path')
+  assert.equal((await snapshot()).elements[0].receiverVolume,0, 'The decoder must also have zero volume')
   assert(!(await snapshot()).subscriptions.some(([id])=>id==='screen'))
   console.log('PASS Room voice subscribes and plays microphones without subscribing to screen audio or opening the local microphone')
   await run("window.voiceTest.volume('screen',.1)")
@@ -149,12 +151,26 @@ app.whenReady().then(async () => {
   await run('window.voiceTest.outputVolume(2)');const outputDouble=await run('window.voiceTest.measureOutput()');
   assert(Math.abs(outputDouble/outputFull-2)<.2, 'Voice output at 200% must double the actual samples')
   await run('window.voiceTest.outputVolume(0)');assert(await run('window.voiceTest.measureOutput()')<.00001)
+  await new Promise(resolve=>setTimeout(resolve,1000))
+  assert.equal(win.webContents.isCurrentlyAudible(),false, 'Zero voice volume must silence actual playback, including the raw WebRTC receiver')
   await run('window.voiceTest.outputVolume(1)')
+  await new Promise(resolve=>setTimeout(resolve,400))
+  assert.equal(win.webContents.isCurrentlyAudible(),true, 'Restoring voice volume must restore actual playback')
   console.log('PASS Voice output slider changes actual decoded audio at 0%, 50%, 100%, and 200%')
   await run("window.voiceTest.localMute('bob',true)")
   assert((await snapshot()).elements[0].muted)
   assert((await snapshot()).state.participants.find(person=>person.id==='bob').locallyMuted)
   assert(!(await snapshot()).state.participants.find(person=>person.id==='bob').speaking)
+  await run('window.voiceTest.outputVolume(.5)')
+  await run('window.voiceTest.resume()')
+  assert(await run('window.voiceTest.measureOutput()')<.00001, 'Changing volume and resuming must preserve local mute')
+  await new Promise(resolve=>setTimeout(resolve,1000))
+  assert.equal(win.webContents.isCurrentlyAudible(),false, 'Participant mute must silence all playback paths, even after resuming audio')
+  await run("window.voiceTest.localMute('bob',false)")
+  await new Promise(resolve=>setTimeout(resolve,400))
+  assert.equal(win.webContents.isCurrentlyAudible(),true, 'Participant unmute must restore actual voice playback')
+  assert(Math.abs(await run('window.voiceTest.measureOutput()')/outputFull-.5)<.12, 'Unmute must restore the selected output volume')
+  await run('window.voiceTest.outputVolume(1)')
   await run("window.voiceTest.localMute('bob',false);window.voiceTest.volume('bob',0)")
   await new Promise(resolve=>setTimeout(resolve,650))
   assert(!(await snapshot()).state.participants.find(person=>person.id==='bob').speaking)

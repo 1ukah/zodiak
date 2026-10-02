@@ -32,6 +32,13 @@ const api = {
     ipcRenderer.on(channels.windowFullscreenChanged, wrapped)
     return () => ipcRenderer.removeListener(channels.windowFullscreenChanged, wrapped)
   },
+  onWindowVisibilityChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, visible: unknown): void => {
+      if (typeof visible === 'boolean') listener(visible)
+    }
+    ipcRenderer.on(channels.windowVisibilityChanged, wrapped)
+    return () => ipcRenderer.removeListener(channels.windowVisibilityChanged, wrapped)
+  },
 } satisfies SharescreenApi
 
 contextBridge.exposeInMainWorld('sharescreen', api)

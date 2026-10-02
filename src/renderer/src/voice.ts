@@ -174,7 +174,7 @@ export class RoomVoice {
   setOutputVolume(volume: number): void {
     if (!Number.isFinite(volume)) return
     this.outputVolume = Math.max(0, Math.min(2, volume))
-    for (const entry of this.audio.values()) entry.gain.gain.value = this.outputVolume
+    for (const [id, entry] of this.audio) entry.gain.gain.value = this.mutedIds.has(id) ? 0 : this.outputVolume
   }
 
   async setOutputDevice(id: string): Promise<void> {
@@ -321,14 +321,18 @@ export class RoomVoice {
       element.muted = this.mutedIds.has(id)
       // Keep a muted receiver attached so Chromium continues decoding incoming
       // WebRTC audio while the gain graph feeds the selected output device.
+      const stream = new MediaStream([track.mediaStreamTrack])
       const receiver = document.createElement('audio')
       receiver.muted = true
+      receiver.volume = 0
       receiver.autoplay = true
-      track.attach(receiver)
+      // LiveKit's attach() unmutes audio elements and can create its own output
+      // graph. Assign the stream directly so only the processed element is heard.
+      receiver.srcObject = stream
       this.context ??= new AudioContext()
-      const source = this.context.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]))
+      const source = this.context.createMediaStreamSource(stream)
       const gain = this.context.createGain()
-      gain.gain.value = this.outputVolume
+      gain.gain.value = this.mutedIds.has(id) ? 0 : this.outputVolume
       const destination = this.context.createMediaStreamDestination()
       source.connect(gain).connect(destination)
       element.srcObject = destination.stream
@@ -338,6 +342,7 @@ export class RoomVoice {
       void this.play(id, entry)
     }
     entry.element.muted = this.mutedIds.has(id)
+    entry.gain.gain.value = this.mutedIds.has(id) ? 0 : this.outputVolume
   }
 
   private async play(id: string, entry: VoicePlayback): Promise<void> {
@@ -351,7 +356,6 @@ export class RoomVoice {
   private removeAudio(id: string): void {
     const entry = this.audio.get(id)
     if (!entry) return
-    entry.track.detach(entry.receiver)
     entry.receiver.pause()
     entry.receiver.srcObject = null
     entry.receiver.remove()

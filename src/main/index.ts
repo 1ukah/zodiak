@@ -5,11 +5,8 @@ import { channels, shareBitrateRangeFor, supportsShareQuality, type CaptureAccel
 import { armCapture, listSources, registerCaptureHandler } from './capture'
 import { startSystemAudio, stopSystemAudio } from './system-audio'
 import { loadConfig, saveConfig } from './config'
-import { checkForUpdatesOnStartup, initializeUpdater, requestUpdateCheck } from './updater'
 import { isRecord } from './parse'
 import { settle } from './result'
-import { createLiveRoom, deleteLiveRoom, listLiveRoomParticipants, listLiveRooms } from './rooms'
-import { createParticipantToken } from './tokens'
 
 // Electron enables Chromium's GPU pipeline by default. This app deliberately
 // never calls disableHardwareAcceleration; the renderer also reports Chromium's
@@ -31,20 +28,35 @@ if (app.isPackaged) {
 let sleepBlocker: number | null = null
 let gpuInfoReady = false
 let startupUpdateCheckScheduled = false
+let updaterInitialized = false
+
+async function loadUpdater() {
+  const updater = await import('./updater')
+  if (!updaterInitialized) {
+    updaterInitialized = true
+    updater.initializeUpdater(() => BrowserWindow.getAllWindows()[0] ?? null)
+  }
+  return updater
+}
 
 // Electron documents GPU feature status as valid only after this event.
 app.on('gpu-info-update', () => { gpuInfoReady = true })
 
+let cachedAppIcon: ReturnType<typeof nativeImage.createFromPath> | undefined
 function appIcon() {
-  const svgPath = app.isPackaged
-    ? join(process.resourcesPath, 'icon.svg')
-    : join(__dirname, '../../build/icon.svg')
-  const svgIcon = nativeImage.createFromPath(svgPath)
-  if (!svgIcon.isEmpty()) return svgIcon
-
-  return nativeImage.createFromPath(app.isPackaged
-    ? join(process.resourcesPath, 'app-icon.png')
-    : join(__dirname, '../../build/icon.png'))
+  // Windows can load ICO directly. Passing the 6032px source PNG here made
+  // each window spend nearly two seconds synchronously preparing its icon.
+  if (process.platform === 'win32') {
+    return app.isPackaged
+      ? join(process.resourcesPath, 'app-icon.ico')
+      : join(__dirname, '../../build/icon.ico')
+  }
+  if (!cachedAppIcon) {
+    cachedAppIcon = nativeImage.createFromPath(app.isPackaged
+      ? join(process.resourcesPath, 'app-icon.png')
+      : join(__dirname, '../../build/icon.png')).resize({ width: 256, height: 256 })
+  }
+  return cachedAppIcon
 }
 
 function splashLogo() {
@@ -108,7 +120,7 @@ function createWindow(splash: BrowserWindow | null = null): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
     },
   })
 
@@ -130,6 +142,13 @@ function createWindow(splash: BrowserWindow | null = null): void {
   }
   win.on('enter-full-screen', () => notifyFullscreen(true))
   win.on('leave-full-screen', () => notifyFullscreen(false))
+  const notifyVisibility = (visible: boolean): void => {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channels.windowVisibilityChanged, visible)
+  }
+  win.on('minimize', () => notifyVisibility(false))
+  win.on('restore', () => notifyVisibility(true))
+  win.on('hide', () => notifyVisibility(false))
+  win.on('show', () => notifyVisibility(true))
   win.webContents.on('will-navigate', (event, url) => {
     const devUrl = process.env.ELECTRON_RENDERER_URL
     if (devUrl && url.startsWith(devUrl)) return
@@ -153,7 +172,9 @@ function createWindow(splash: BrowserWindow | null = null): void {
     if (splash && !splash.isDestroyed()) splash.close()
     if (!startupUpdateCheckScheduled) {
       startupUpdateCheckScheduled = true
-      void checkForUpdatesOnStartup()
+      void loadConfig().then(async config => {
+        if (app.isPackaged && config.checkForUpdatesOnStartup) await (await loadUpdater()).checkForUpdatesOnStartup()
+      }).catch(error => console.warn('Could not check for updates:', error))
     }
   }
   const onRendererReady = (event: Electron.IpcMainEvent): void => {
@@ -267,14 +288,14 @@ function registerIpc(): void {
   ipcMain.handle(channels.getConfig, () => loadConfig())
   ipcMain.handle(channels.saveConfig, (_event, payload: unknown) => settle(() => saveConfig(payload)))
   ipcMain.handle(channels.checkForUpdates, (_event, channel: unknown) => settle(async () => {
-    await requestUpdateCheck(true, channel)
+    await (await loadUpdater()).requestUpdateCheck(true, channel)
     return true as const
   }))
-  ipcMain.handle(channels.createToken, (_event, payload: unknown) => settle(() => createParticipantToken(payload)))
-  ipcMain.handle(channels.listRooms, () => settle(() => listLiveRooms()))
-  ipcMain.handle(channels.listRoomParticipants, (_event, payload: unknown) => settle(() => listLiveRoomParticipants(payload)))
-  ipcMain.handle(channels.createRoom, (_event, payload: unknown) => settle(() => createLiveRoom(payload)))
-  ipcMain.handle(channels.deleteRoom, (_event, payload: unknown) => settle(() => deleteLiveRoom(payload)))
+  ipcMain.handle(channels.createToken, (_event, payload: unknown) => settle(async () => (await import('./tokens')).createParticipantToken(payload)))
+  ipcMain.handle(channels.listRooms, () => settle(async () => (await import('./rooms')).listLiveRooms()))
+  ipcMain.handle(channels.listRoomParticipants, (_event, payload: unknown) => settle(async () => (await import('./rooms')).listLiveRoomParticipants(payload)))
+  ipcMain.handle(channels.createRoom, (_event, payload: unknown) => settle(async () => (await import('./rooms')).createLiveRoom(payload)))
+  ipcMain.handle(channels.deleteRoom, (_event, payload: unknown) => settle(async () => (await import('./rooms')).deleteLiveRoom(payload)))
   ipcMain.handle(channels.listSources, () => settle(() => listSources()))
   ipcMain.handle(channels.prepareShare, (_event, payload: unknown) =>
     settle(async () => {
@@ -324,10 +345,20 @@ function registerPermissions(): void {
   registerCaptureHandler()
 }
 
-app.whenReady().then(() => {
+// Multiple launches must not create independent Chromium/GPU/audio process trees.
+const primaryInstance = app.requestSingleInstanceLock()
+if (!primaryInstance) app.quit()
+app.on('second-instance', () => {
+  const win = BrowserWindow.getAllWindows().find(window => window.getBounds().width !== 360)
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+})
+
+if (primaryInstance) app.whenReady().then(() => {
   registerPermissions()
   registerIpc()
-  initializeUpdater(() => BrowserWindow.getAllWindows()[0] ?? null)
   const splash = createSplash()
   // Let the small splash paint before loading the main renderer and its modules.
   splash.once('ready-to-show', () => {

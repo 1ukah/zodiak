@@ -14,5 +14,6 @@ export default defineConfig({
   },
   renderer: {
     publicDir: resolve('build'),
+    build: { minify: 'esbuild' },
   },
 })

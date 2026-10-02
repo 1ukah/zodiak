@@ -1,9 +1,10 @@
 import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
-import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, sendChatMessage, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session'
-import { hydrateIcons, icon, labelButton } from './icons'
+import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, sendChatMessage, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, setTelemetryEnabled, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session-loader'
+import { hydrateIcons, icon, labelButton, setButtonIcon } from './icons'
 import { RoomChat } from './chat'
-import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, setVoiceParticipantMuted } from './session'
+import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, setVoiceParticipantMuted } from './session-loader'
 import type { VoiceState } from './voice'
+import { setViewerVisible } from './session-loader'
 
 hydrateIcons()
 
@@ -109,13 +110,16 @@ let selectedStreamId: string | null = null
 let hideLocalPreview = false
 let gridView = false
 let listing = false
+let nextBackgroundRoomRefresh = 0
 let serverUnavailable = false
 let telemetry: StreamTelemetry = {}
 let captureAccelerationStatus: CaptureAccelerationStatus | null = null
 let lastGridSignature = ''
+let gridVideos = new Map<string, HTMLVideoElement>()
 let roomsFingerprint = ''
 let selectedAudioOutput = 'default'
 let windowFullscreen = false
+let windowVisible = true
 let screenControlsVisible = false
 let screenControlsTimer: number | null = null
 const streamVolumes = new Map<string, number>()
@@ -185,13 +189,14 @@ async function boot(): Promise<void> {
   syncAudioControls()
   renderChrome()
   window.sharescreen.rendererReady()
-  void loadAudioOutputs()
-  void loadVoiceInputs()
   void refreshRooms()
   // Room events keep an open room current instantly. The lobby poll is only a
   // fallback for other rooms and deliberately does not rebuild the video UI
   // when the response is unchanged.
-  window.setInterval(() => void refreshRooms(), 5_000)
+  window.setInterval(() => void refreshRooms(true), 5_000)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) void refreshRooms()
+  })
 }
 
 function bind(): void {
@@ -317,6 +322,7 @@ function bind(): void {
   voiceInputVolume.addEventListener('input', syncVoiceInputVolume)
   showStreamStatisticsInput.addEventListener('change', () => {
     showStatistics = showStreamStatisticsInput.checked
+    setTelemetryEnabled(showStatistics)
     renderTelemetry()
   })
   audioOutputInput.addEventListener('change', () => void onAudioOutputChanged())
@@ -338,6 +344,12 @@ function bind(): void {
     if (!active) setTheater(false)
     syncFullscreenLabel()
   })
+  window.sharescreen.onWindowVisibilityChanged?.((visible) => {
+    windowVisible = visible
+    setViewerVisible(visible)
+    document.body.classList.toggle('window-hidden', !visible)
+    if (visible) void refreshRooms()
+  })
   document.addEventListener('keydown', (event) => {
     if (stageWrap.contains(document.activeElement)) revealScreenControls()
     if (event.key === 'Escape' && windowFullscreen) {
@@ -350,12 +362,24 @@ function bind(): void {
   window.addEventListener('resize', syncRailOverflow)
 }
 
-async function refreshRooms(): Promise<void> {
+async function refreshRooms(background = false): Promise<void> {
   if (listing) return
+  if (background && (!windowVisible || document.hidden || Date.now() < nextBackgroundRoomRefresh || !savedConfig?.url || !savedConfig.apiKey || !savedConfig.apiSecret)) return
+  if (!savedConfig?.url || !savedConfig.apiKey || !savedConfig.apiSecret) {
+    if (serverUnavailable && !rooms.length) return
+    serverUnavailable = true
+    rooms = []
+    roomsFingerprint = ''
+    renderRooms()
+    renderChrome()
+    return
+  }
   listing = true
   try {
     const listed = await window.sharescreen.listRooms()
     if (!listed.ok) {
+      nextBackgroundRoomRefresh = Date.now() + 30_000
+      if (serverUnavailable && !rooms.length) return
       chat.clearHistory()
       serverUnavailable = true
       rooms = []
@@ -366,7 +390,8 @@ async function refreshRooms(): Promise<void> {
       return
     }
     const fingerprint = JSON.stringify(listed.value)
-    const changed = fingerprint !== roomsFingerprint
+    const changed = fingerprint !== roomsFingerprint || serverUnavailable
+    nextBackgroundRoomRefresh = 0
     roomsFingerprint = fingerprint
     rooms = listed.value
     serverUnavailable = false
@@ -376,6 +401,8 @@ async function refreshRooms(): Promise<void> {
       renderChrome()
     }
   } catch (error) {
+    nextBackgroundRoomRefresh = Date.now() + 30_000
+    if (serverUnavailable && !rooms.length) return
     serverUnavailable = true
     chat.clearHistory()
     rooms = []
@@ -756,6 +783,7 @@ function renderGrid(active: boolean): void {
   lastGridSignature = signature
   if (!active) {
     streamGrid.replaceChildren()
+    gridVideos.clear()
     setGridVideos(new Map())
     return
   }
@@ -781,7 +809,7 @@ function renderGrid(active: boolean): void {
       const focus = () => { gridView = false; selectedStreamId = stream.id; watchStream(stream.id); selectStream(stream.id); renderChrome() }
       tile.addEventListener('click', focus)
       tile.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); focus() } })
-      const tileVideo = document.createElement('video')
+      const tileVideo = gridVideos.get(stream.id) ?? document.createElement('video')
       tileVideo.autoplay = true
       tileVideo.playsInline = true
       tileVideo.muted = true
@@ -849,6 +877,7 @@ function renderGrid(active: boolean): void {
     tiles.append(tile)
   }
   streamGrid.replaceChildren(tiles)
+  gridVideos = targets
   setGridVideos(targets)
 }
 
@@ -909,7 +938,7 @@ function syncVoiceUI(): void {
     const button = byId(id, HTMLButtonElement)
     button.disabled = !available || voiceState.busy || voiceState.deafened
     button.classList.toggle('is-muted', voiceState.muted)
-    button.innerHTML = icon(voiceState.muted ? 'mic-off' : 'mic')
+    setButtonIcon(button, voiceState.muted ? 'mic-off' : 'mic')
     button.setAttribute('aria-pressed', String(voiceState.muted))
     labelButton(button, !voiceState.enabled ? 'Voice chat disabled in settings' : voiceState.deafened ? 'Microphone muted while deafened' : voiceState.muted ? 'Unmute microphone' : 'Mute microphone')
   }
@@ -917,7 +946,7 @@ function syncVoiceUI(): void {
     const button = byId(id, HTMLButtonElement)
     button.disabled = !available || voiceState.busy
     button.classList.toggle('is-muted', voiceState.deafened)
-    button.innerHTML = icon(voiceState.deafened ? 'headphones-off' : 'headphones')
+    setButtonIcon(button, voiceState.deafened ? 'headphones-off' : 'headphones')
     button.setAttribute('aria-pressed', String(voiceState.deafened))
     labelButton(button, !voiceState.enabled ? 'Voice chat disabled in settings' : voiceState.deafened ? 'Undeafen' : 'Deafen')
   }
@@ -962,7 +991,7 @@ function syncVoiceUI(): void {
       mute.hidden = state?.muted === true || state?.locallyMuted === true || state?.enabled === false
       mute.disabled = !available
       mute.classList.toggle('voice-local-muted', state?.locallyMuted === true)
-      mute.innerHTML = icon(state?.locallyMuted ? 'mic-off' : 'mic')
+      setButtonIcon(mute, state?.locallyMuted ? 'mic-off' : 'mic')
       mute.setAttribute('aria-pressed', String(state?.locallyMuted === true))
       labelButton(mute, `${state?.locallyMuted ? 'Unmute' : 'Mute'} ${name} for you`)
     }
@@ -988,7 +1017,7 @@ async function loadVoiceInputs(): Promise<void> {
   if (!navigator.mediaDevices?.enumerateDevices) return
   const selection = voiceInput.value || savedConfig?.voiceInputDeviceId || 'default'
   try {
-    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(device => device.kind === 'audioinput')
+    const devices = (await enumerateAudioDevices()).filter(device => device.kind === 'audioinput')
     voiceInput.replaceChildren(Object.assign(document.createElement('option'), { value: 'default', textContent: 'System default' }))
     devices.filter(device => device.deviceId && device.deviceId !== 'default').forEach((device, index) => {
       voiceInput.append(Object.assign(document.createElement('option'), { value: device.deviceId, textContent: device.label || `Microphone ${index + 1}` }))
@@ -1055,10 +1084,16 @@ function syncAudioVolume(): void {
   setRemoteAudioVolume(value / 100)
 }
 
+let audioDevicesRequest: Promise<MediaDeviceInfo[]> | null = null
+function enumerateAudioDevices(): Promise<MediaDeviceInfo[]> {
+  audioDevicesRequest ??= navigator.mediaDevices.enumerateDevices().finally(() => { audioDevicesRequest = null })
+  return audioDevicesRequest
+}
+
 async function loadAudioOutputs(): Promise<void> {
   if (!supportsRemoteAudioOutputSelection() || !navigator.mediaDevices?.enumerateDevices) return
   try {
-    const devices = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'audiooutput')
+    const devices = (await enumerateAudioDevices()).filter((device) => device.kind === 'audiooutput')
     const selectionExists = selectedAudioOutput === 'default' || devices.some((device) => device.deviceId === selectedAudioOutput)
     if (!selectionExists) selectedAudioOutput = 'default'
     audioOutputInput.replaceChildren(Object.assign(document.createElement('option'), { value: 'default', textContent: 'System default' }))
@@ -1101,6 +1136,7 @@ function renderTelemetry(): void {
   const hasMetrics = Boolean(telemetry.sent || telemetry.received)
   const focusView = currentRoom !== null && !gridView && selectedStreamId !== null
   streamMetrics.hidden = !hasMetrics || !showStatistics || !focusView
+  if (streamMetrics.hidden) return
   renderMetricCard(hostMetrics, telemetry.sent, 'host')
   renderMetricCard(viewerMetrics, telemetry.received, 'viewer')
 }
@@ -1127,6 +1163,9 @@ function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, s
       ['Budget', formatBitrate(metric.maxBitrate)],
       ['Encoder target', formatBitrate(metric.targetBitrate)],
       ['GPU encode', gpuFeatureLabel(captureAccelerationStatus)],
+      ['Encoder', metric.encoder ?? '—'],
+      ['Efficient encode', metric.powerEfficientEncoder === undefined ? '—' : metric.powerEfficientEncoder ? 'Yes' : 'No'],
+      ['Encode', formatMilliseconds(metric.encodeTimeMs)],
       ['Limit', formatLimitation(metric)],
       ['RTT', formatMilliseconds(metric.roundTripTimeMs)],
     ]
@@ -1186,6 +1225,7 @@ function fillForm(config: AppConfig): void {
   savedConfig = config
   urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
   showStatistics = config.showStreamStatistics
+  setTelemetryEnabled(showStatistics)
   checkForUpdatesOnStartupInput.checked = config.checkForUpdatesOnStartup
   updateChannelInput.value = config.updateChannel === 'beta' ? 'beta' : 'stable'
   showStreamStatisticsInput.checked = showStatistics
@@ -1206,6 +1246,7 @@ function openSettings(): void {
   clearNote(settingsNote)
   selectSettingsTab('account')
   if (!settingsDialog.open) settingsDialog.showModal()
+  void loadAudioOutputs()
   void loadVoiceInputs()
 }
 function selectSettingsTab(name: string): void {

@@ -62,6 +62,9 @@ export interface StreamMetric {
   framesDropped?: number
   codec?: string
   decoder?: string
+  encoder?: string
+  powerEfficientEncoder?: boolean
+  encodeTimeMs?: number
   packetLossPercent?: number
   roundTripTimeMs?: number
   jitterMs?: number
@@ -141,6 +144,9 @@ let rosterProvider: (() => Promise<RosterParticipant[]>) | null = null
 let rosterRequestInFlight = false
 let lastStats = new Map<string, CounterSample>()
 let telemetryInFlight = false
+let telemetryEnabled = false
+let viewerVisible = true
+export function setViewerVisible(visible: boolean): void { viewerVisible = visible }
 let localScreenTargetBitrate: number | undefined
 let localParticipantName: string | undefined
 const receivedChatIds = new Set<string>()
@@ -336,9 +342,10 @@ export function setStageVideoVisible(visible: boolean): void {
 export function setGridVideos(next: Map<string, HTMLVideoElement>): void {
   gridTracks.forEach((track, id) => {
     const target = gridTargets.get(id)
+    if (target && next.get(id) === target) return
     if (target) track.detach(target)
+    gridTracks.delete(id)
   })
-  gridTracks.clear()
   gridTargets = next
   syncGridVideos()
 }
@@ -452,7 +459,7 @@ function bindRoom(next: Room): void {
     if (room === next) refreshRoomState(next)
   })
   next.on(RoomEvent.Reconnected, () => {
-    if (room === next) refreshRoomState(next)
+    if (room === next) { refreshRoomState(next); void refreshRoster(next) }
   })
   next.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
     if (room !== next) return
@@ -494,7 +501,6 @@ function refreshRoomState(current: Room): void {
   hooks?.onViewers(current.remoteParticipants.size)
   refreshParticipants(current)
   refreshStreams(current)
-  void refreshRoster(current)
 }
 
 function refreshStreams(current: Room): void {
@@ -575,7 +581,9 @@ function startRosterSync(current: Room): void {
   if (rosterTimer !== null) window.clearInterval(rosterTimer)
   rosterTimer = null
   if (!rosterProvider) return
-  rosterTimer = window.setInterval(() => void refreshRoster(current), 2_000)
+  rosterTimer = window.setInterval(() => {
+    if (viewerVisible && !document.hidden) void refreshRoster(current)
+  }, 15_000)
 }
 
 function stopRosterSync(): void {
@@ -620,6 +628,8 @@ function addRemoteStream(destination: Map<string, StreamRecord>, publication: Re
 function attachSelectedVideo(): void {
   const media = targets
   if (!media) return
+  const desired = stageVideoVisible && selectedStreamId ? streams.get(selectedStreamId)?.track : undefined
+  if (selectedTrack === desired && media.video.srcObject) return
   if (selectedTrack) selectedTrack.detach(media.video)
   selectedTrack = null
   if (!stageVideoVisible) {
@@ -808,14 +818,21 @@ function clearMedia(): void {
 
 function startTelemetry(current: Room): void {
   stopTelemetry()
+  if (!telemetryEnabled) return
   const collect = (): void => {
     if (room !== current) return
-    if (telemetryInFlight) return
+    if (telemetryInFlight || !viewerVisible || document.hidden) return
     telemetryInFlight = true
-    void collectTelemetry(current).finally(() => { telemetryInFlight = false })
+    void collectTelemetry(current).catch(() => undefined).finally(() => { telemetryInFlight = false })
   }
   collect()
   statsTimer = window.setInterval(collect, 1000)
+}
+
+export function setTelemetryEnabled(enabled: boolean): void {
+  telemetryEnabled = enabled
+  if (!enabled) stopTelemetry()
+  else if (room) startTelemetry(room)
 }
 
 function stopTelemetry(): void {
@@ -830,11 +847,19 @@ async function collectTelemetry(current: Room): Promise<void> {
   const selected = selectedStreamId ? streams.get(selectedStreamId) : undefined
   const telemetry: StreamTelemetry = {}
   if (localTrack?.kind === Track.Kind.Video) {
-    const senderStats = await localTrack.getSenderStats().catch(() => [])
-    const primary = senderStats.reduce((largest, stat) => (stat.bytesSent ?? 0) > (largest?.bytesSent ?? 0) ? stat : largest, senderStats[0])
+    // SDK convenience statistics omit encoder implementation and timing fields.
+    const report = await localTrack.sender?.getStats().catch(() => undefined)
+    const records = report ? Array.from(report.values()) as Array<Record<string, unknown>> : []
+    const senderStats = records.filter(stat => stat.type === 'outbound-rtp' && (stat.kind === 'video' || stat.mediaType === 'video'))
+    const primary = senderStats.reduce<Record<string, unknown> | undefined>((largest, stat) => numberValue(stat.bytesSent) > numberValue(largest?.bytesSent) ? stat : largest, senderStats[0])
     if (primary) {
       const metric = toMetric('sent', primary as unknown as Record<string, unknown>)
-      enrichNetworkMetrics(metric, senderStats as unknown as Array<Record<string, unknown>>)
+      const remote = records.find(stat => stat.id === primary.remoteId)
+      enrichNetworkMetrics(metric, [primary, ...(remote ? [remote] : [])])
+      metric.codec = stringValue(records.find(stat => stat.id === primary.codecId)?.mimeType)
+      metric.encoder = stringValue(primary.encoderImplementation)
+      if (typeof primary.powerEfficientEncoder === 'boolean') metric.powerEfficientEncoder = primary.powerEfficientEncoder
+      if (typeof primary.totalEncodeTime === 'number' && numberValue(primary.framesEncoded) > 0) metric.encodeTimeMs = primary.totalEncodeTime / numberValue(primary.framesEncoded) * 1_000
       // This is our cap; retain Chromium's own target bitrate separately so the
       // diagnostics can distinguish a configured limit from bandwidth estimation.
       metric.maxBitrate = localScreenTargetBitrate
@@ -845,12 +870,15 @@ async function collectTelemetry(current: Room): Promise<void> {
       telemetry.sent = metric
     }
   }
-  if (selected && !selected.local) {
-    const receiverStats = await (selected.track as RemoteVideoTrack).getReceiverStats().catch(() => undefined)
+  if (selected?.track && !selected.local) {
+    const report = await (selected.track as RemoteVideoTrack).receiver?.getStats().catch(() => undefined)
+    const records = report ? Array.from(report.values()) as Array<Record<string, unknown>> : []
+    const receiverStats = records.find(stat => stat.type === 'inbound-rtp' && (stat.kind === 'video' || stat.mediaType === 'video'))
     if (receiverStats) {
       const record = receiverStats as unknown as Record<string, unknown>
       const metric = toMetric(`received:${selected.id}`, record)
       enrichNetworkMetrics(metric, [record])
+      metric.codec = stringValue(records.find(stat => stat.id === record.codecId)?.mimeType)
       telemetry.received = metric
     }
   }
