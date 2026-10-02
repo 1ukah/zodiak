@@ -14,6 +14,7 @@ import {
 import { shareBitrateFor, type SharePriority, type ShareQuality } from '../../shared/types'
 import { closeSystemAudio, openSystemAudioTrack } from './system-audio'
 import { CHAT_MAX_BYTES, CHAT_MAX_LENGTH, CHAT_TOPIC, parseChatPacket, type ChatMessage, type ChatPacket } from '../../shared/chat'
+import { RoomVoice, type VoiceSettings, type VoiceState } from './voice'
 
 export interface MediaTargets {
   video: HTMLVideoElement
@@ -76,6 +77,7 @@ export interface StreamTelemetry {
 export type Presence = 'offline' | 'connecting' | 'connected' | 'reconnecting'
 
 export interface SessionHooks {
+  onVoice?: (state: VoiceState) => void
   /** Unexpected disconnects only; explicit leave/switch never emits this. */
   onRoomLost?: () => void
   onChatMessage: (message: ChatMessage) => void
@@ -101,6 +103,20 @@ interface RemoteAudioGraph {
 }
 
 let room: Room | null = null
+let voice: RoomVoice | null = null
+let voiceAudioBlocked = false
+let screenAudioBlocked = false
+
+function notifyScreenAudioBlocked(blocked: boolean): void {
+  screenAudioBlocked = blocked
+  hooks?.onAudioBlocked(screenAudioBlocked || voiceAudioBlocked)
+}
+
+export async function configureVoice(settings: VoiceSettings): Promise<void> { await voice?.configure(settings) }
+export function setVoiceInputVolume(volume: number): void { voice?.setInputVolume(volume) }
+export async function setVoiceMuted(muted: boolean): Promise<void> { await voice?.setMuted(muted) }
+export async function setVoiceDeafened(deafened: boolean): Promise<void> { await voice?.setDeafened(deafened) }
+export function setVoiceParticipantMuted(id: string, muted: boolean): void { voice?.setParticipantMuted(id, muted) }
 let targets: MediaTargets | null = null
 let hooks: SessionHooks | null = null
 let suppressDisconnectError = false
@@ -147,6 +163,7 @@ export async function joinRoom(args: {
   media: MediaTargets
   hooks: SessionHooks
   roster?: () => Promise<RosterParticipant[]>
+  voice?: VoiceSettings
 }): Promise<void> {
   await leaveRoom()
   receivedChatIds.clear()
@@ -164,8 +181,18 @@ export async function joinRoom(args: {
   bindRoom(next)
   try {
     await next.connect(args.url, args.token, { autoSubscribe: args.subscribe })
+    if (args.voice) {
+      voice = new RoomVoice(next, args.media.audioRack, args.voice,
+        state => { if (room === next) hooks?.onVoice?.(state) },
+        blocked => { voiceAudioBlocked = blocked; hooks?.onAudioBlocked(screenAudioBlocked || voiceAudioBlocked) })
+      await voice.setOutputDevice(remoteAudioOutputDeviceId || 'default')
+      voice.setOutputVolume(remoteAudioVolume)
+      await voice.start()
+    }
   } catch (error) {
     room = null
+    voice?.close()
+    voice = null
     await next.disconnect()
     throw error instanceof Error ? error : new Error('Could not connect')
   }
@@ -339,9 +366,10 @@ export function setStreamVolume(id: string, volume: number): void {
   if (element) applyAudioVolume(record.participantId, element)
 }
 
-/** Applies a single playback level to every remote screen-audio track. */
+/** Applies a single playback level to incoming screen and voice audio. */
 export function setRemoteAudioVolume(volume: number): void {
   remoteAudioVolume = Math.max(0, Math.min(2, volume))
+  voice?.setOutputVolume(remoteAudioVolume)
   remoteAudio.forEach((element, identity) => applyAudioVolume(identity, element))
 }
 
@@ -350,12 +378,12 @@ export async function setRemoteAudioOutputDevice(deviceId: string): Promise<void
   const previous = remoteAudioOutputDeviceId
   remoteAudioOutputDeviceId = deviceId
   try {
-    await Promise.all([...remoteAudio.values()].map((element) => setSinkId(element, deviceId)))
+    await Promise.all([voice?.setOutputDevice(deviceId), ...[...remoteAudio.values()].map((element) => setSinkId(element, deviceId))])
   } catch (error) {
     remoteAudioOutputDeviceId = previous
     // Return existing audio to the selected device if one element rejected the
     // new sink (for example, because it was unplugged mid-selection).
-    await Promise.allSettled([...remoteAudio.values()].map((element) => setSinkId(element, previous)))
+    await Promise.allSettled([voice?.setOutputDevice(previous || 'default'), ...[...remoteAudio.values()].map((element) => setSinkId(element, previous))])
     throw error
   }
 }
@@ -368,17 +396,20 @@ export function supportsRemoteAudioOutputSelection(): boolean {
 export async function resumeRemoteAudio(): Promise<void> {
   try {
     await Promise.all([
+      voice?.resume(),
       audioContext?.resume(),
       ...[...remoteAudioGraphs.values()].map(({ receiverElement }) => receiverElement.play()),
       ...[...remoteAudio.values()].map((element) => element.play()),
     ])
-    hooks?.onAudioBlocked(false)
+    notifyScreenAudioBlocked(false)
   } catch {
-    hooks?.onAudioBlocked(true)
+    notifyScreenAudioBlocked(true)
   }
 }
 
 export async function leaveRoom(): Promise<void> {
+  voice?.close()
+  voice = null
   const current = room
   room = null
   suppressDisconnectError = true
@@ -681,9 +712,9 @@ async function attachAudio(track: RemoteTrack, participant: RemoteParticipant): 
     await setSinkId(element, remoteAudioOutputDeviceId)
     if (remoteAudio.get(participant.identity) !== element || remoteAudioTracks.get(participant.identity) !== track) return
     await element.play()
-    if (remoteAudio.get(participant.identity) === element && remoteAudioTracks.get(participant.identity) === track) hooks?.onAudioBlocked(false)
+    if (remoteAudio.get(participant.identity) === element && remoteAudioTracks.get(participant.identity) === track) notifyScreenAudioBlocked(false)
   } catch {
-    if (remoteAudio.get(participant.identity) === element) hooks?.onAudioBlocked(true)
+    if (remoteAudio.get(participant.identity) === element) notifyScreenAudioBlocked(true)
   }
 }
 
@@ -742,6 +773,10 @@ function isScreenAudio(track: RemoteTrack): boolean {
 }
 
 function clearMedia(): void {
+  voice?.close()
+  voice = null
+  voiceAudioBlocked = false
+  screenAudioBlocked = false
   stopRosterSync()
   stopTelemetry()
   if (selectedTrack && targets) selectedTrack.detach(targets.video)

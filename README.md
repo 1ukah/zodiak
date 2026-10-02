@@ -15,15 +15,20 @@ Zodiak is a Windows desktop app for sharing screens with people in rooms on a Li
 - Choose the playback device and volume for incoming stream audio.
 - Optionally exclude Discord audio from a system-audio share.
 - Chat with the current room or whisper privately to another participant.
+- Talk in the current room, mute your microphone, deafen, or mute a participant's voice for yourself.
 - Dock chat on the right or bottom, hide it with unread badges, and optionally preview incoming messages in compact bubbles.
 
 ## How rooms work
 
 Set a display name, select a room, and join it. Anyone in the room can view active screen shares and can start their own screen share. Rooms accept names made of letters, numbers, dashes, and underscores. Leaving a room only disconnects you; deleting a room is a separate, deliberate action.
 
-Zodiak publishes screens, screen audio, and chat data within the connected LiveKit room. It does not publish cameras or microphones. Whispers are addressed only to the selected participant in that room.
+Zodiak publishes screens, screen audio, microphone audio, and chat data within the connected LiveKit room. It does not publish cameras. Whispers are addressed only to the selected participant in that room.
 
-Chat starts with the room tab. Use the message icon beside a participant to open a private tab; only private tabs can be closed. Consecutive messages from the same sender group together. Links open in your browser, images preview inline, and supported videos load when clicked. Use the chat icon (or Ctrl+Shift+C) to show or hide the panel. Position and **Show chat bubbles** are saved in settings.
+Voice starts with your microphone muted each time you join a room. Use the microphone and headphones buttons beside your profile (or in the controls in focus view) to mute and deafen. Deafening silences incoming voices and automatically mutes your microphone; undeafening restores its previous mute state. Voice controls do not affect shared screen audio. In the Audio settings tab, disable voice entirely or select a Windows microphone; save to apply the change. Input volume adjusts your transmitted microphone audio from 0% to 100% and is saved locally. Its live preview reverts when settings are closed without saving. The output selector and output volume apply to both voices and screen audio, with output volume supporting up to 200%.
+
+The participant list shows microphone and headphones status, and a green avatar border with a white name while someone is speaking. Hover or focus a participant's row to mute their voice for yourself. A red microphone marks your local mute; other people see only that participant's own mute/deafen status. Local participant mutes last for the current room session. Leaving or switching rooms stops microphone capture and voice playback.
+
+Chat starts with the room tab. Use the message icon beside a participant to open a private tab; only private tabs can be closed. Consecutive messages from the same sender group together. Links open in your browser, images preview inline, and supported videos load when clicked. Use the chat icon (or Ctrl+Shift+C) to show or hide the panel. Chat always opens on the right. **Show chat bubbles** is saved in the Interface settings tab.
 
 Chat history is held only in app memory (up to 500 messages per tab), separately for each server and room. Leaving or switching rooms keeps the messages you received while connected, along with open whisper tabs and drafts; returning restores them. Closing the app or losing the LiveKit server clears all cached history. There is no server history or offline delivery: messages sent while you are away are not added when you return. Closing a whisper discards its local history; a new incoming whisper opens its tab again.
 
@@ -49,6 +54,8 @@ npm run pack
 ```
 
 Chat checks: `npm run test:chat` validates the protocol and UI. `npm run test:chat:live` connects four Electron clients using `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` environment variables, verifies room/whisper delivery, and removes its temporary test rooms.
+
+Voice checks: `npm run test:voice` verifies real WebRTC playback, microphone lifecycle, mute/deafen behavior, settings, and participant indicators with a fake microphone. `npm run test:voice:live` uses the same three `LIVEKIT_*` variables to verify production tokens and room voice delivery in three Electron clients, including screen-audio independence and room isolation. It removes its temporary test rooms.
 
 `npm run pack` creates the Windows installer at `dist/zodiak-setup.exe`. Building the installer also requires the .NET 8 SDK for the system-audio helper.
 
