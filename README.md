@@ -22,4 +22,4 @@ Zodiak is a Windows app for screen sharing, text chat, and voice chat. Connect t
 
 ## Screenshot
 
-<img width="1917" height="1031" alt="zodiak_0yDFqyrL8D" src="https://github.com/user-attachments/assets/752de5c4-f546-4660-9578-9fe42b6ed326" />
+<img width="1920" height="1032" alt="zodiak_OqYoc5MnII" src="https://github.com/user-attachments/assets/92bdeaa6-db57-487a-97d9-5f5329e378b1" />
