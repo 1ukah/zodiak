@@ -33,9 +33,10 @@
     "audit:performance": "npm run build && electron tests/performance-audit.cjs",
     "test:voice": "electron tests/voice-session.cjs && electron tests/voice-ui.cjs",
     "test:preferences": "node tests/participant-preferences.cjs",
-    "test:noise": "node tests/noise-suppression.cjs",
+    "test:noise": "node tests/noise-suppression.cjs && node tests/noise-gate.cjs",
     "test:loopback": "electron tests/microphone-loopback.cjs",
     "test:voice:live": "electron tests/voice-live.cjs",
+    "test:voice:background": "npm run build && electron tests/voice-background.cjs",
     "test:startup": "npm run build && electron tests/startup-smoke.cjs"
   },
   "build": {

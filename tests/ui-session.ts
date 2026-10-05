@@ -34,8 +34,8 @@ export async function joinRoom(options) {
 }
 export async function leaveRoom() { streams = []; hooks?.onStreams([]); hooks?.onParticipants([]); hooks?.onConnection('offline') }
 export function setVoiceInputVolume(volume) { state.inputVolume = volume }
-export async function configureVoice(settings) { state.inputVolume = settings.inputVolume ?? state.inputVolume; state.voiceDevice = settings.inputDeviceId; state.noiseSuppression = settings.noiseSuppression === true; state.suppressionStrength=settings.suppressionStrength??state.suppressionStrength; state.emitVoice({ enabled: settings.enabled }) }
-export async function setVoiceMuted(muted) { state.emitVoice({ muted }) }
+export async function configureVoice(settings) { state.processing={...state.processing,...settings}; state.inputVolume = settings.inputVolume ?? state.inputVolume; state.voiceDevice = settings.inputDeviceId; state.noiseSuppression = settings.noiseSuppression === true; state.suppressionStrength=settings.suppressionStrength??state.suppressionStrength; state.emitVoice({ enabled: settings.enabled }) }
+export async function setVoiceMuted(muted) { state.emitVoice({ muted, ...(!muted ? { deafened: false } : {}) }) }
 let microphoneTesting=false, previousVoice, incomingVolume=1
 export async function setMicrophoneTestActive(active) {
   if(microphoneTesting===active)return

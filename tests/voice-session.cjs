@@ -55,7 +55,7 @@ const room={state:ConnectionState.Connected,localParticipant:local,remotePartici
   async switchActiveDevice(kind,id){if(failDevice)throw Error('Device unplugged');if(pub)await pub.track.setDeviceId(id);return true}
 };
 let voice; let blocked = false;
-function setup(enabled=true,participantVolumes={}){voice?.close();pub=undefined;voice=new RoomVoice(room,document.body,{enabled,inputDeviceId:'default',noiseSuppression:false,participantVolumes},state=>states.push(state),value=>{blocked=value});return voice.start()}
+function setup(enabled=true,participantVolumes={}){voice?.close();pub=undefined;voice=new RoomVoice(room,document.body,{enabled,inputDeviceId:'default',noiseSuppression:false,noiseGate:false,participantVolumes},state=>states.push(state),value=>{blocked=value});return voice.start()}
 async function addRemote(id, source=Track.Source.Microphone) {
   await tx.resume(); const oscillator=tx.createOscillator(); const gain=tx.createGain(); gain.gain.value=0;
   const destination=tx.createMediaStreamDestination(); oscillator.connect(gain).connect(destination);oscillator.start();
@@ -118,9 +118,10 @@ window.voiceTest={setup, async add(id,source){remotes.set(id,await addRemote(id,
   measureOutput:(id='bob')=>rms(voice.audio.get(id).element.srcObject),
   async beginInputMeasure(){toneCapture=true;await voice.configure({enabled:false,inputDeviceId:'default'});await voice.configure({enabled:true,inputDeviceId:'default'});await voice.setMuted(false);window.inputSignal=await inputStream()},
   measureInput:()=>rms(window.inputSignal),
-  async beginNoiseMeasure(){noiseCapture=true;await voice.configure({enabled:false,inputDeviceId:'default',noiseSuppression:false});await voice.configure({enabled:true,inputDeviceId:'default'});await voice.setMuted(false);window.inputSignal=await inputStream()},
+  async beginNoiseMeasure(){await setup();noiseCapture=true;await voice.configure({enabled:false,inputDeviceId:'default',noiseSuppression:false});await voice.configure({enabled:true,inputDeviceId:'default'});await voice.setMuted(false);window.inputSignal=await inputStream()},
   noise:enabled=>voice.configure({enabled:voice.enabled,inputDeviceId:'default',noiseSuppression:enabled}),
   restartInput:()=>pub.track.restartTrack(),
+  processing:changes=>voice.configure({enabled:voice.enabled,inputDeviceId:'default',...changes}),
   holdNoise(){holdNoise=true},startNoise(){window.noiseStartup=voice.configure({enabled:true,inputDeviceId:'default',noiseSuppression:true})},
   releaseNoise(){holdNoise=false;releaseNoise?.()},
   volume(id,value){remotes.get(id).gain.gain.value=value}, muted:set=>voice.setMuted(set),deafened:set=>voice.setDeafened(set),
@@ -167,6 +168,18 @@ app.whenReady().then(async () => {
   assert.equal((await config.loadConfig()).voiceEnabled,true)
   assert.equal((await config.loadConfig()).voiceInputDeviceId,'default')
   assert.equal((await config.loadConfig()).voiceNoiseSuppression,true)
+  for (const key of ['voiceEchoCancellation','voiceAutoGainControl','voiceNoiseGate','voiceAutoInputSensitivity']) {
+    assert.equal((await config.loadConfig())[key],key !== 'voiceAutoGainControl')
+    await config.saveConfig({...await config.loadConfig(),[key]:false})
+    assert.equal((await config.loadConfig())[key],false)
+  }
+  await config.saveConfig({...await config.loadConfig(),voiceAutoGainControl:true})
+  assert.equal((await config.loadConfig()).voiceAutoGainControl,true,'An explicit choice to enable automatic gain control must survive reload')
+  await config.saveConfig({...await config.loadConfig(),voiceInputSensitivity:-42})
+  assert.equal((await config.loadConfig()).voiceInputSensitivity,-42)
+  assert.equal(config.validateConfig({...await config.loadConfig(),voiceInputSensitivity:NaN}).voiceInputSensitivity,-50)
+  assert.equal(config.validateConfig({...await config.loadConfig(),voiceInputSensitivity:12}).voiceInputSensitivity,0)
+  assert.equal(config.validateConfig({...await config.loadConfig(),voiceInputSensitivity:-150}).voiceInputSensitivity,-100)
   console.log('PASS Voice settings survive reload; legacy configurations default to enabled voice and the Windows default microphone')
   await build({stdin:{contents:harness,resolveDir:path.join(root,'src/renderer/src'),loader:'ts'},bundle:true,format:'iife',outfile:path.join(temp,'main.js')})
   await fs.writeFile(path.join(temp,'index.html'), '<!doctype html><script src="./main.js"></script>')
@@ -209,10 +222,16 @@ app.whenReady().then(async () => {
   await run('window.voiceTest.outputVolume(0)');assert(await run('window.voiceTest.measureOutput()')<.00001)
   await new Promise(resolve=>setTimeout(resolve,1000))
   assert((await snapshot()).elements.every(element=>element.receiverMuted&&element.receiverVolume===0), 'Raw WebRTC receivers must not bypass zero processed volume')
+  assert(!(await snapshot()).state.participants.find(person=>person.id==='bob').speaking,'A remote border must clear when global playback volume is zero')
   await run('window.voiceTest.outputVolume(1)')
   await new Promise(resolve=>setTimeout(resolve,400))
   assert(await run('window.voiceTest.measureOutput()')>.02, 'Restoring voice volume must restore the processed signal')
-  console.log('PASS Voice output slider changes actual decoded audio at 0%, 50%, 100%, and 200%')
+  await run("window.voiceTest.volume('bob',.003)")
+  const quietRemote=await run('window.voiceTest.measureOutput()')
+  assert(quietRemote>.001&&quietRemote<.01)
+  assert((await snapshot()).state.participants.find(person=>person.id==='bob').speaking,'Quiet decoded voice below the old threshold must still show as speaking')
+  await run("window.voiceTest.volume('bob',.1)")
+  console.log('PASS Voice output slider changes actual decoded audio at 0%, 50%, 100%, and 200%; speaking follows quiet decoded output and clears at zero')
   await run("window.voiceTest.add('alice')")
   await run("window.voiceTest.volume('alice',.1);window.voiceTest.participantVolume('bob',.3)")
   assert.equal((await snapshot()).state.participants.find(person=>person.id==='bob').volume,.3)
@@ -258,9 +277,11 @@ app.whenReady().then(async () => {
   console.log('PASS Speaking follows microphone audio, ignores screen audio, clears after silence, and local mute silences only the selected voice')
   await run('window.voiceTest.beginInputMeasure()')
   const inputFull=await run('window.voiceTest.measureInput()');assert(inputFull>.02)
+  assert((await snapshot()).state.participants.find(person=>person.id==='me').speaking,'Final microphone output must activate the local border')
   await run('window.voiceTest.inputVolume(.5)');const inputHalf=await run('window.voiceTest.measureInput()');
   assert(Math.abs(inputHalf/inputFull-.5)<.15, 'Microphone at 50% must halve the transmitted audio')
   await run('window.voiceTest.inputVolume(0)');assert(await run('window.voiceTest.measureInput()')<.0001)
+  assert(!(await snapshot()).state.participants.find(person=>person.id==='me').speaking,'Zero outgoing gain must clear the local border')
   await run('window.voiceTest.muted(true)');await run('window.voiceTest.muted(false)');assert(await run('window.voiceTest.measureInput()')<.0001)
   await run('window.voiceTest.inputVolume(1)');assert(await run('window.voiceTest.measureInput()')>.02)
   await run('window.voiceTest.testing(true)')
@@ -281,6 +302,35 @@ app.whenReady().then(async () => {
   console.log('PASS Local microphone testing stops capture/reception and advertises muted/deafened status while preserving prior mute/deafen choices')
   await run('window.voiceTest.muted(true);window.voiceTest.muted(false)');assert(await run('window.voiceTest.measureInput()')>.02)
   console.log('PASS Input gain changes actual transmitted WebRTC audio; zero remains silent through mute/unmute and restoring 100% restores audio')
+  await run('window.voiceTest.processing({echoCancellation:false,autoGainControl:false})')
+  assert.equal((await snapshot()).captureOptions.at(-1).echoCancellation,false)
+  assert.equal((await snapshot()).captureOptions.at(-1).autoGainControl,false)
+  await run('window.voiceTest.processing({noiseGate:true,autoInputSensitivity:false,inputSensitivity:-10})')
+  await new Promise(resolve=>setTimeout(resolve,500)) // Hold/release plus the WebRTC receive buffer must drain.
+  assert(await run('window.voiceTest.measureInput()')<.0001,'Gate must silence below-threshold audio transmitted over WebRTC')
+  assert(!(await snapshot()).state.participants.find(person=>person.id==='me').speaking,'A closed gate must clear the border even while the raw microphone still has audio')
+  await run('window.voiceTest.processing({inputSensitivity:-40})')
+  assert(await run('window.voiceTest.measureInput()')>.02,'Lowering the threshold must reopen transmitted audio')
+  assert((await snapshot()).state.participants.find(person=>person.id==='me').speaking,'Reopening the gate must restore the local border')
+  await run('window.voiceTest.noise(true);window.voiceTest.inputVolume(.1)')
+  const quietProcessed=await run('window.voiceTest.measureInput()')
+  assert(quietProcessed>.0005&&quietProcessed<.012,'Fixture must produce quiet but audible final filtered output: '+quietProcessed)
+  assert((await snapshot()).state.participants.find(person=>person.id==='me').speaking,'Quiet speech must activate the border after RNNoise, the gate, and input gain')
+  await run('window.voiceTest.restartInput()')
+  assert(await run('window.voiceTest.measureInput()')>.0005)
+  assert((await snapshot()).state.participants.find(person=>person.id==='me').speaking,'Speaking must follow the new processed track after an SDK restart without a room event')
+  await run('window.voiceTest.processing({inputSensitivity:-10})')
+  await new Promise(resolve=>setTimeout(resolve,500))
+  assert(await run('window.voiceTest.measureInput()')<.0001)
+  assert(!(await snapshot()).state.participants.find(person=>person.id==='me').speaking,'Suppressed and gated output must remain dark after a restart')
+  await run('window.voiceTest.processing({inputSensitivity:-40});window.voiceTest.noise(false);window.voiceTest.inputVolume(1)')
+
+  await run('window.voiceTest.muted(true);window.voiceTest.processing({echoCancellation:true,autoGainControl:true});window.voiceTest.muted(false)')
+  assert.equal((await snapshot()).captureOptions.at(-1).echoCancellation,true)
+  assert.equal((await snapshot()).captureOptions.at(-1).autoGainControl,true)
+  await run('window.voiceTest.processing({noiseGate:false})')
+  console.log('PASS Capture toggles apply immediately and while muted; gate silences and reopens actual transmitted audio')
+
   await run('window.voiceTest.beginNoiseMeasure()')
   const rawNoise=await run('window.voiceTest.measureInput()');assert(rawNoise>.01)
   const nodesBefore=(await snapshot()).noiseNodesCreated
@@ -296,6 +346,7 @@ app.whenReady().then(async () => {
   const filteredNoise=await run('window.voiceTest.measureInput()')
   assert(filteredNoise<rawNoise*.5,'RNNoise must reduce real noise sent through WebRTC by at least half: '+JSON.stringify({rawNoise,filteredNoise}))
   await run('window.voiceTest.inputVolume(0)');assert(await run('window.voiceTest.measureInput()')<.0001)
+  assert(!(await snapshot()).state.participants.find(person=>person.id==='me').speaking,'Zero outgoing gain must clear the local border')
   await run('window.voiceTest.inputVolume(1);window.voiceTest.noise(false)')
   assert.equal((await snapshot()).noiseActive,false)
   assert.equal((await snapshot()).noiseNodesCreated,(await snapshot()).noiseNodesStopped,'Unchecked suppression must release every worklet')
@@ -333,6 +384,17 @@ app.whenReady().then(async () => {
   assert.equal((await snapshot()).state.muted,true)
   assert.equal((await snapshot()).activeCaptures,0)
   console.log('PASS Deafen stops capture and voice reception; undeafen restores both previously muted and previously unmuted microphone states')
+  for (const previouslyMuted of [true,false]) {
+    await run(`window.voiceTest.muted(${previouslyMuted});window.voiceTest.deafened(true)`)
+    await run('window.voiceTest.muted(false)')
+    const unmuted = await snapshot()
+    assert.equal(unmuted.state.deafened,false)
+    assert.equal(unmuted.state.muted,false)
+    assert.equal(unmuted.attributes['zodiak.voice.deafened'],'false')
+    assert.equal(unmuted.activeCaptures,1)
+    assert(unmuted.elements.length>0,'Unmuting while deafened must restore voice reception')
+  }
+  console.log('PASS Unmuting while deafened restores microphone capture and voice reception regardless of the previous self-mute')
   await run("window.voiceTest.remoteState('bob',{'zodiak.voice.deafened':'true'},true)")
   assert((await snapshot()).state.participants.find(person=>person.id==='bob').deafened)
   await run('window.voiceTest.configure(false)')
@@ -377,7 +439,7 @@ app.whenReady().then(async () => {
   await run('window.voiceTest.close()')
   console.log('PASS Starting microphone testing during pending room capture cancels late publication and restores voice safely afterward')
   const acquisitions=(await snapshot()).captureOptions
-  assert(acquisitions.every(options=>options.echoCancellation===true&&options.noiseSuppression===false), 'Every microphone acquisition must retain echo cancellation without native noise suppression: '+JSON.stringify(acquisitions))
+  assert(acquisitions.every(options=>typeof options.echoCancellation==='boolean'&&options.noiseSuppression===false), 'Every microphone acquisition must honor capture toggles without native noise suppression: '+JSON.stringify(acquisitions))
   await run("window.voiceTest.setup(true,{bob:0,late:.4})")
   assert.equal((await snapshot()).state.participants.find(person=>person.id==='bob').volume,0,'Saved zero volume must be applied before initial voice playback')
   await run("window.voiceTest.add('late')")

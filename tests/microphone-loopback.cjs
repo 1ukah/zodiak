@@ -19,7 +19,7 @@ const timeout = setTimeout(() => { console.error('Microphone loopback test timed
 const harness = `
 import { MicrophoneLoopback } from './microphone-loopback'
 const loopback=new MicrophoneLoopback();
-const settings={inputDeviceId:'default',inputVolume:1,outputDeviceId:'default',outputVolume:1,noiseSuppression:false};
+const settings={inputDeviceId:'default',inputVolume:1,outputDeviceId:'default',outputVolume:1,noiseSuppression:false,noiseGate:false};
 const NativeContext=window.AudioContext;const producer=new NativeContext({sampleRate:48000});
 const contexts=[],captures=[],outputs=[],devices=[],captureOptions=[];let destination,holdMic=false,releaseMic,failMic=false,holdNoise=false,releaseNoise,realMic=false;
 let nodesCreated=0,nodesStopped=0;
@@ -56,6 +56,7 @@ window.loopbackTest={
   holdMic(){holdMic=true},releaseMic(){holdMic=false;releaseMic()},failMic:value=>failMic=value,
   holdNoise(){holdNoise=true},releaseNoise(){holdNoise=false;releaseNoise()},realMic(){realMic=true;settings.inputDeviceId='default'},
   snapshot:()=>({active:loopback.active,liveCaptures:captures.filter(track=>track.readyState==='live').length,
+    monitorsProcessedTrack:!!loopback.current?.output&&loopback.current.output.source.mediaStream.getAudioTracks()[0]===loopback.current.processor.processedTrack,
     liveOutputs:outputs.filter(track=>track.readyState==='live').length,contexts:contexts.map(context=>context.state),
     elements:document.querySelectorAll('audio[data-voice-loopback]').length,playing:!!document.querySelector('audio[data-voice-loopback]')&&!document.querySelector('audio[data-voice-loopback]').paused,
     nodesCreated,nodesStopped,noiseLoading:!!releaseNoise,permissionLoading:!!releaseMic,devices,captureOptions,
@@ -81,6 +82,7 @@ app.whenReady().then(async () => {
   await win.loadFile(path.join(temp,'index.html'))
   await run('window.loopbackTest.start()')
   assert((await snapshot()).playing)
+  assert((await snapshot()).monitorsProcessedTrack,'Playback must monitor the shared processor output, never the raw capture track')
   assert.equal((await snapshot()).nodesCreated, 0)
   const raw = await run('window.loopbackTest.measure()')
   assert(raw > .01)
@@ -99,6 +101,15 @@ app.whenReady().then(async () => {
   await run('window.loopbackTest.configure({suppressionStrength:1})')
   const strong=await run('window.loopbackTest.measure()')
   assert(strong<filtered*.8, 'Full strength must suppress more than the gentler default: '+JSON.stringify({filtered,strong}))
+  await run('window.loopbackTest.configure({suppressionStrength:.8,noiseGate:true,autoInputSensitivity:false,inputSensitivity:-20,inputVolume:.5,outputVolume:.5})')
+  await pause(400)
+  assert(await run('window.loopbackTest.measure()')<.0001,'The gate must silence the actual RNNoise-filtered preview with input and output gain enabled')
+  await run('window.loopbackTest.configure({inputSensitivity:-90})')
+  const combined=await run('window.loopbackTest.measure()')
+  assert(combined>filtered*.15&&combined<filtered*.35,'Reopening the gate must restore suppressed audio multiplied by both gains: '+JSON.stringify({filtered,combined}))
+  assert((await snapshot()).monitorsProcessedTrack,'Changing processing settings must never reconnect playback to raw capture')
+  await run('window.loopbackTest.configure({noiseGate:false,inputVolume:1,outputVolume:1})')
+  console.log('PASS Microphone preview uses the processed track; suppression, gate, input gain, and output gain apply together without a raw bypass')
   await run('window.loopbackTest.configure({suppressionStrength:0})')
   assert.equal((await snapshot()).nodesCreated,(await snapshot()).nodesStopped,'Zero strength must stop RNNoise processing')
   assert(await run('window.loopbackTest.measure()')>raw*.75)
@@ -137,11 +148,21 @@ app.whenReady().then(async () => {
   console.log('PASS Permission failure cleans up and allows a subsequent microphone test')
   await run('window.loopbackTest.realMic();window.loopbackTest.start()')
   assert.equal((await snapshot()).captureSettings.at(-1).echoCancellation,true)
+  assert.equal((await snapshot()).captureSettings.at(-1).autoGainControl,false)
   assert.equal((await snapshot()).captureSettings.at(-1).noiseSuppression,false)
   await run('window.loopbackTest.configure({noiseSuppression:false})')
   assert.equal((await snapshot()).captureSettings.at(-1).echoCancellation,true)
   assert.equal((await snapshot()).captureSettings.at(-1).noiseSuppression,false)
   assert((await snapshot()).captureOptions.every(options=>options.echoCancellation===true&&options.noiseSuppression===false), 'Every microphone acquisition must retain echo cancellation without native noise suppression')
+  await run('window.loopbackTest.configure({autoGainControl:true})')
+  assert.equal((await snapshot()).captureSettings.at(-1).autoGainControl,true,'Enabling gain control must apply to actual capture')
+  await run('window.loopbackTest.configure({echoCancellation:false,autoGainControl:false})')
+  assert.equal((await snapshot()).captureOptions.at(-1).echoCancellation,false)
+  assert.equal((await snapshot()).captureOptions.at(-1).autoGainControl,false)
+  assert.equal((await snapshot()).captureSettings.at(-1).echoCancellation,false)
+  assert.equal((await snapshot()).captureSettings.at(-1).autoGainControl,false)
+  await run('window.loopbackTest.configure({noiseGate:true,autoInputSensitivity:false,inputSensitivity:0})')
+  assert(await run('window.loopbackTest.measure()')<.0001,'Loopback must use the same sensitivity gate as room capture')
   await run('window.loopbackTest.stop()');await stopped()
   console.log('PASS Chromium loopback capture enables echo cancellation and disables native suppression with RNNoise on and off')
   clearTimeout(timeout);win.destroy();app.exit(0)

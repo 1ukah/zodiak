@@ -28,7 +28,7 @@
         <div class="header-actions">
           <button id="pop-out" class="icon-button" type="button" title="Pop out" aria-label="Pop out" hidden><span data-icon="popout"></span></button>
           <button id="fullscreen" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button>
-          <button id="chat-toggle" class="icon-button chat-toggle" type="button" title="Hide chat" aria-label="Hide chat" aria-controls="chat-panel" aria-expanded="true" hidden><span data-icon="chat"></span><span class="chat-badge" hidden></span></button>
+          <button id="chat-toggle" class="icon-button chat-toggle" type="button" title="Show chat" aria-label="Show chat" aria-controls="chat-panel" aria-expanded="false" hidden><span data-icon="chat"></span><span class="chat-badge" hidden></span></button>
         </div>
       </header>
       <div id="stage" class="is-idle">
@@ -97,6 +97,13 @@
             <label class="check" for="voice-enabled"><span>Voice chat</span><input id="voice-enabled" type="checkbox" role="switch" checked title="Send and receive voice in the current room" /></label>
             <label class="check" for="voice-noise-suppression"><span>Noise supression</span><input id="voice-noise-suppression" type="checkbox" checked title="Reduce microphone background noise" /></label>
             <label class="field audio-volume" id="suppression-strength-field" for="voice-suppression-strength"><span class="volume-heading"><span>Suppression strength</span><output id="voice-suppression-strength-value" for="voice-suppression-strength">80%</output></span><input id="voice-suppression-strength" type="range" min="0" max="100" value="80" title="Lower values preserve more voice and background sound; 100% applies full suppression" aria-label="Suppression strength" /></label>
+            <label class="check" for="voice-noise-gate"><span>Noise gate</span><input id="voice-noise-gate" type="checkbox" role="switch" checked title="Silence microphone audio below the input sensitivity threshold" /></label>
+            <label class="check" for="voice-auto-sensitivity"><span>Automatically adjust input sensitivity</span><input id="voice-auto-sensitivity" type="checkbox" role="switch" checked /></label>
+            <label class="field audio-volume input-sensitivity" for="voice-input-sensitivity"><span class="volume-heading"><span>Input sensitivity</span><output id="voice-input-sensitivity-value" for="voice-input-sensitivity">Automatic</output></span><span class="sensitivity-track"><span id="voice-input-level" aria-hidden="true"></span><input id="voice-input-sensitivity" type="range" min="-100" max="0" step="1" value="-50" aria-label="Input sensitivity" aria-describedby="voice-sensitivity-help" /></span></label>
+            <output id="voice-gate-status" class="quality-note">Test your microphone to see the input level</output>
+            <p id="voice-sensitivity-help" class="quality-note">Sounds below the threshold are silenced. Turn off automatic sensitivity to adjust it; move right to block louder background sounds.</p>
+            <label class="check" for="voice-echo-cancellation"><span>Echo cancellation</span><input id="voice-echo-cancellation" type="checkbox" role="switch" checked title="Reduce speaker audio picked up by your microphone" /></label>
+            <label class="check" for="voice-auto-gain-control"><span>Automatic gain control</span><input id="voice-auto-gain-control" type="checkbox" role="switch" title="Automatically adjust capture volume for a consistent voice level" /></label>
           </section>
           <section id="settings-panel-interface" role="tabpanel" aria-labelledby="settings-tab-interface" tabindex="0" hidden>
             <label class="check" for="show-stream-statistics"><span>Stream statistics</span><input id="show-stream-statistics" type="checkbox" role="switch" title="Show host and viewer stream statistics" /></label>

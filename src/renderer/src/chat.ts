@@ -59,7 +59,7 @@ export class RoomChat {
   private participants: RoomParticipant[] = []
   private active = 'room'
   private roomName: string | null = null
-  private visible = true
+  private visible = false
   private connected = false
   private bubbles = false
   private sending = false

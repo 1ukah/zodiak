@@ -29,6 +29,7 @@ async function start() {
           await new Promise(resolve => setTimeout(resolve, 250))
           const loaded = await win.webContents.executeJavaScript(`Boolean(window.sharescreen && document.querySelector('#profile-name').textContent === 'Startup check' && document.querySelector('.workspace-rail .icon'))`)
           if (!loaded) throw Error('Main window appeared before the interface initialized')
+          if (win.webContents.getBackgroundThrottling()) throw Error('The production media window must not throttle background audio')
           const engineLoaded = await win.webContents.executeJavaScript(`performance.getEntriesByType('resource').some(entry => new URL(entry.name).pathname.split('/').at(-1).startsWith('session-'))`)
           if (engineLoaded) throw Error('WebRTC engine was loaded before joining a room')
           if (splashWindow && !splashWindow.isDestroyed()) throw Error('Splash remained after startup')
