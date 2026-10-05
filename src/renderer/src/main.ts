@@ -2,9 +2,12 @@ import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type Captur
 import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, sendChatMessage, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, setTelemetryEnabled, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session-loader'
 import { hydrateIcons, icon, labelButton, setButtonIcon } from './icons'
 import { RoomChat } from './chat'
-import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, setVoiceParticipantMuted } from './session-loader'
+import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, setVoiceParticipantMuted, setVoiceParticipantVolume, setMicrophoneTestActive } from './session-loader'
 import type { VoiceState } from './voice'
+import type { LoopbackSettings, MicrophoneLoopback } from './microphone-loopback'
 import { setViewerVisible } from './session-loader'
+import type { ParticipantPreference, ParticipantPreferenceUpdate } from '../../shared/types'
+import { initializeUpdateUI } from './update-ui'
 
 hydrateIcons()
 
@@ -33,6 +36,9 @@ const stage = elementById('stage')
 const stageWrap = elementById('stage-wrap')
 const video = byId('stage-video', HTMLVideoElement)
 const streamGrid = elementById('stream-grid')
+const focusedStreamViewers = Object.assign(document.createElement('div'), { className: 'stream-viewers', id: 'focused-stream-viewers', hidden: true })
+stageWrap.append(focusedStreamViewers)
+for (const event of ['pointerdown', 'click', 'keydown']) focusedStreamViewers.addEventListener(event, event => event.stopPropagation())
 const focusedStreamVolume = byId('focused-stream-volume', HTMLDivElement)
 const focusedStreamVolumeInput = byId('focused-stream-volume-input', HTMLInputElement)
 const focusedStreamVolumeValue = byId('focused-stream-volume-value', HTMLOutputElement)
@@ -48,6 +54,14 @@ const viewerMetrics = byId('viewer-metrics', HTMLElement)
 const membersPanel = elementById('members-panel')
 const membersCount = byId('members-count', HTMLSpanElement)
 const membersList = elementById('members-list')
+const participantAudio = Object.assign(document.createElement('div'), { id: 'participant-audio', className: 'participant-audio', popover: 'manual' })
+const participantAudioMute = Object.assign(document.createElement('button'), { type: 'button', className: 'focused-stream-mute' })
+const participantAudioSlider = Object.assign(document.createElement('input'), { id: 'participant-audio-volume', type: 'range', min: '0', max: '100', value: '100' })
+const participantAudioValue = Object.assign(document.createElement('output'), { value: '100%' })
+participantAudioValue.htmlFor = participantAudioSlider.id
+participantAudio.setAttribute('role', 'group')
+participantAudio.append(participantAudioMute, participantAudioSlider, participantAudioValue)
+let participantAudioId: string | null = null
 const picker = byId('picker', HTMLDialogElement)
 const pickerForm = byId('picker-form', HTMLFormElement)
 const refreshButton = byId('refresh-sources', HTMLButtonElement)
@@ -74,9 +88,16 @@ const checkForUpdatesOnStartupInput = byId('check-for-updates-on-startup', HTMLI
 const updateChannelInput = byId('update-channel', HTMLSelectElement)
 const showChatBubblesInput = byId('show-chat-bubbles', HTMLInputElement)
 const voiceEnabledInput = byId('voice-enabled', HTMLInputElement)
+const noiseSuppressionInput = byId('voice-noise-suppression', HTMLInputElement)
+const suppressionStrengthInput = byId('voice-suppression-strength', HTMLInputElement)
+const suppressionStrengthValue = byId('voice-suppression-strength-value', HTMLOutputElement)
 const voiceInput = byId('voice-input', HTMLSelectElement)
 const voiceInputNote = byId('voice-input-note', HTMLParagraphElement)
 const refreshVoiceInputButton = byId('refresh-voice-input', HTMLButtonElement)
+const voiceLoopbackButton = byId('voice-loopback', HTMLButtonElement)
+let microphoneLoopback: MicrophoneLoopback | null = null
+let loopbackRequested = false
+let loopbackRequest = 0
 let voiceState: VoiceState = { enabled: true, muted: true, deafened: false, busy: false, participants: [] }
 const voiceInputVolume = byId('voice-input-volume', HTMLInputElement)
 const voiceInputVolumeValue = byId('voice-input-volume-value', HTMLOutputElement)
@@ -123,6 +144,9 @@ let windowVisible = true
 let screenControlsVisible = false
 let screenControlsTimer: number | null = null
 const streamVolumes = new Map<string, number>()
+let participantPreferenceServer: string | null = null
+let participantPreferences = new Map<string, ParticipantPreference>()
+const participantPreferenceWrites = new Set<Promise<void>>()
 let roomPendingDeletion: string | null = null
 const chat = new RoomChat(sendChatMessage, makeAvatar, () => renderMembers())
 
@@ -145,6 +169,7 @@ const hooks: SessionHooks = {
       return participant.id === previous.id && participant.name === previous.name && participant.local === previous.local
     })) return
     participants = ordered
+    rememberParticipantPreferences(ordered)
     if (!joiningSession) chat.setParticipants(ordered)
     renderMembers()
     renderChrome()
@@ -153,8 +178,10 @@ const hooks: SessionHooks = {
     // Opening the overview is safe: unpublished/unselected cards do not have
     // a media track attached, so they consume neither video decode nor audio.
     const selected = selectedStreamId ? next.find((stream) => stream.id === selectedStreamId) : undefined
-    if ((next.length > 1 && (!selected || selected.local)) || (next.some((stream) => !stream.local) && streams.length === 0)) gridView = true
+    const streamsChanged = next.length !== streams.length || next.some(stream => !streams.some(previous => previous.id === stream.id))
+    if (streamsChanged && ((next.length > 1 && (!selected || selected.local)) || (next.some((stream) => !stream.local) && streams.length === 0))) gridView = true
     streams = next
+    if (!next.some((stream) => stream.local)) hideLocalPreview = false
     for (const id of streamVolumes.keys()) if (!next.some((stream) => stream.id === id)) streamVolumes.delete(id)
     if (selectedStreamId && !streams.some((stream) => stream.id === selectedStreamId)) selectedStreamId = null
     if (!selectedStreamId && next.some((stream) => stream.local)) selectBestStream()
@@ -185,6 +212,7 @@ async function boot(): Promise<void> {
   }
   fillForm(await window.sharescreen.getConfig())
   bind()
+  initializeUpdateUI(window.sharescreen)
   syncSystemAudioControls()
   syncAudioControls()
   renderChrome()
@@ -200,6 +228,30 @@ async function boot(): Promise<void> {
 }
 
 function bind(): void {
+  document.body.append(participantAudio)
+  participantAudioMute.addEventListener('click', () => {
+    if (!participantAudioId) return
+    const state = voiceState.participants.find(person => person.id === participantAudioId)
+    setVoiceParticipantMuted(participantAudioId, !state?.locallyMuted)
+  })
+  participantAudioSlider.addEventListener('input', () => {
+    if (!participantAudioId) return
+    const id = participantAudioId
+    const volume = participantAudioSlider.valueAsNumber / 100
+    setVoiceParticipantVolume(id, volume)
+    const participant = participants.find(person => person.id === id)
+    if (participant) rememberParticipantPreferences([participant], volume)
+    if (voiceState.participants.find(person => person.id === id)?.locallyMuted) setVoiceParticipantMuted(id, false)
+  })
+  const dismissParticipantAudio = (event: Event) => {
+    const target = event.target
+    if (target instanceof Element && !participantAudio.contains(target) && !target.closest('.member-voice-mute, .voice-status-button')) closeParticipantAudio()
+  }
+  document.addEventListener('pointerdown', dismissParticipantAudio)
+  document.addEventListener('click', dismissParticipantAudio)
+  document.addEventListener('focusin', dismissParticipantAudio)
+  window.addEventListener('resize', positionParticipantAudio)
+  membersPanel.addEventListener('scroll', positionParticipantAudio, true)
   const settingsTabs = [...settingsDialog.querySelectorAll<HTMLButtonElement>('[data-settings-tab]')]
   settingsTabs.forEach((tab, index) => {
     tab.addEventListener('click', () => selectSettingsTab(tab.dataset.settingsTab!))
@@ -223,7 +275,8 @@ function bind(): void {
   elementById('lobby-settings').addEventListener('click', openSettings)
   elementById('server-settings').addEventListener('click', openServerSettings)
   document.querySelectorAll<HTMLButtonElement>('[data-close]').forEach((button) => button.addEventListener('click', () => byId(button.dataset.close!, HTMLDialogElement).close()))
-  settingsDialog.addEventListener('close', () => { if (savedConfig) fillForm(savedConfig) })
+  settingsDialog.addEventListener('close', () => { stopMicrophoneTest(); if (savedConfig) { fillForm(savedConfig); void previewVoiceSettings() } })
+  window.addEventListener('pagehide', stopMicrophoneTest)
   serverDialog.addEventListener('close', () => { if (savedConfig) fillForm(savedConfig) })
   deleteDialog.addEventListener('close', () => { roomPendingDeletion = null; clearNote(deleteNote) })
   byId('save-settings', HTMLButtonElement).addEventListener('click', async () => {
@@ -234,7 +287,7 @@ function bind(): void {
       const saved = await persistConfig()
       if (!saved) return
       if (currentRoom) {
-        try { await configureVoice({ enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume }) }
+        try { await configureVoice({ enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength }) }
         catch (error) { showNote(settingsNote, `Settings saved. ${messageOf(error)}`, 'error'); return }
       }
       if (currentRoom && saved.displayName !== previousName) {
@@ -280,8 +333,6 @@ function bind(): void {
   })
   hideMyScreenButton.addEventListener('click', () => {
     hideLocalPreview = !hideLocalPreview
-    // Keep a hidden local share reachable from the same available-stream card
-    // used for remote shares, instead of removing it from the overview.
     if (hideLocalPreview) gridView = true
     selectBestStream()
     renderChrome()
@@ -328,7 +379,11 @@ function bind(): void {
   audioOutputInput.addEventListener('change', () => void onAudioOutputChanged())
   refreshAudioOutputButton.addEventListener('click', () => void loadAudioOutputs())
   refreshVoiceInputButton.addEventListener('click', () => void loadVoiceInputs())
-  voiceEnabledInput.addEventListener('change', syncVoiceSettings)
+  voiceLoopbackButton.addEventListener('click', () => void toggleMicrophoneTest())
+  voiceInput.addEventListener('change', () => void updateMicrophoneTest())
+  voiceEnabledInput.addEventListener('change', () => { syncVoiceSettings(); void previewVoiceSettings() })
+  noiseSuppressionInput.addEventListener('change', () => { syncVoiceSettings(); void updateMicrophoneTest(); void previewVoiceSettings() })
+  suppressionStrengthInput.addEventListener('input', () => { syncSuppressionStrength(); void updateMicrophoneTest(); void previewVoiceSettings() })
   for (const id of ['voice-mute', 'voice-focus-mute']) elementById(id).addEventListener('click', () => void changeVoice(() => setVoiceMuted(!voiceState.muted)))
   for (const id of ['voice-deafen', 'voice-focus-deafen']) elementById(id).addEventListener('click', () => void changeVoice(() => setVoiceDeafened(!voiceState.deafened)))
   navigator.mediaDevices?.addEventListener?.('devicechange', () => { void loadAudioOutputs(); void loadVoiceInputs() })
@@ -351,6 +406,14 @@ function bind(): void {
     if (visible) void refreshRooms()
   })
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && participantAudioId) {
+      event.preventDefault()
+      const member = participantAudioMember()
+      closeParticipantAudio()
+      const trigger = member?.querySelector<HTMLButtonElement>('.voice-status-button') ?? member?.querySelector<HTMLButtonElement>('.member-voice-mute')
+      trigger?.focus()
+      return
+    }
     if (stageWrap.contains(document.activeElement)) revealScreenControls()
     if (event.key === 'Escape' && windowFullscreen) {
       void toggleFullscreen()
@@ -500,6 +563,10 @@ async function connect(roomName: string, role: Role): Promise<boolean> {
   const saved = await persistConfig(); if (!saved) return false
   const issued = await window.sharescreen.createToken({ role, displayName: saved.displayName, room: roomName })
   if (!issued.ok) { showNote(picker.open ? pickerNote : stageNote, issued.error, 'error'); return false }
+  const preferences = await window.sharescreen.getParticipantPreferences(issued.value.url)
+  if (!preferences.ok) { showNote(stageNote, `Could not load participant volumes: ${preferences.error}`, 'error'); return false }
+  participantPreferenceServer = issued.value.url
+  participantPreferences = new Map(Object.entries(preferences.value))
   joiningSession = true
   const workspace = elementById('room-workspace')
   workspace.inert = true
@@ -511,7 +578,7 @@ async function connect(roomName: string, role: Role): Promise<boolean> {
       url: issued.value.url,
       token: issued.value.token,
       subscribe: false,
-      voice: { enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume },
+      voice: { enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength, participantVolumes: Object.fromEntries([...participantPreferences].map(([id, preference]) => [id, preference.volume])) },
       media: { video, audioRack },
       hooks: {
         ...hooks,
@@ -680,11 +747,14 @@ async function onStop(): Promise<void> {
 
 async function onLeave(): Promise<void> {
   leaveButton.disabled = true
+  await Promise.allSettled([...participantPreferenceWrites])
   try { await window.sharescreen.setSharing(false); await leaveRoom()
   } finally { resetRoomState(); closePicker(); clearNote(stageNote); leaveButton.disabled = false; renderChrome(); void refreshRooms() }
 }
 
 function resetRoomState(): void {
+  participantPreferenceServer = null
+  participantPreferences.clear()
   setTheater(false)
   currentRoom = null; connection = 'offline'; streams = []; participants = []; selectedStreamId = null; hideLocalPreview = false; gridView = false; telemetry = {}; lastGridSignature = ''; streamVolumes.clear(); hearButton.hidden = true
   chat.reset()
@@ -714,7 +784,7 @@ function renderChrome(): void {
   hideMyScreenButton.setAttribute('aria-pressed', String(hideLocalPreview))
   stopButton.hidden = !localStream; leaveButton.hidden = !inRoom
   const hasVideo = visibleStreams.some((stream) => stream.local || stream.subscribed)
-  syncScreenControlsVisibility(hasVideo)
+  syncScreenControlsVisibility(hasVideo || visibleStreams.some(stream => stream.viewers?.length))
   fullscreenButton.hidden = !hasVideo
   fullscreenFocusButton.hidden = !hasVideo
   popOutButton.hidden = !hasVideo || gridView
@@ -727,6 +797,7 @@ function renderChrome(): void {
   setStageVideoVisible(!useGrid && Boolean(selectedStreamId))
   renderFocusedStreamVolume(useGrid)
   renderGrid(useGrid)
+  renderStreamViewers(useGrid)
   elementById('call-controls').hidden = !inRoom
   renderTelemetry()
   renderParticipantTiles(inRoom && !useGrid && !selectedStreamId && participants.length > 0)
@@ -742,6 +813,42 @@ function renderChrome(): void {
   waitingMessage.hidden = true
   waiting.hidden = selectedStreamId !== null || participants.length > 0
   if (selectedStreamId === null) waiting.setAttribute('aria-label', hideLocalPreview && localStream ? 'Local preview hidden' : 'No screens')
+}
+
+function updateStreamViewers(counter: HTMLElement, stream: ScreenStream | undefined): void {
+  const viewers = stream?.viewers ?? []
+  counter.hidden = viewers.length === 0
+  const signature = JSON.stringify([stream?.id, stream?.participantName, viewers])
+  if (counter.dataset.signature === signature) return
+  counter.dataset.signature = signature
+  counter.setAttribute('role', 'group')
+  counter.setAttribute('aria-label', `${viewers.length} watching ${stream?.participantName ?? ''}'s screen`)
+  const badge = Object.assign(document.createElement('span'), { className: 'stream-viewers-badge' })
+  badge.innerHTML = icon('account')
+  badge.append(Object.assign(document.createElement('span'), { className: 'stream-viewers-count', textContent: String(viewers.length) }))
+  const dropdown = Object.assign(document.createElement('div'), { className: 'stream-viewers-dropdown' })
+  const list = Object.assign(document.createElement('ul'), { className: 'stream-viewers-list' })
+  list.setAttribute('aria-label', 'Watching this stream')
+  for (const viewer of viewers) {
+    list.append(Object.assign(document.createElement('li'), { textContent: viewer.name, title: viewer.name }))
+  }
+  dropdown.append(list)
+  counter.replaceChildren(badge, dropdown)
+}
+
+function renderStreamViewers(useGrid: boolean): void {
+  updateStreamViewers(focusedStreamViewers, !useGrid && currentRoom && !video.hidden ? streams.find(stream => stream.id === selectedStreamId) : undefined)
+  for (const tile of streamGrid.querySelectorAll<HTMLElement>('[data-stream-id]')) {
+    const stream = streams.find(stream => stream.id === tile.dataset.streamId)
+    let counter = tile.querySelector<HTMLElement>('.stream-viewers')
+    if (!stream?.viewers?.length) { counter?.remove(); continue }
+    if (!counter) {
+      counter = Object.assign(document.createElement('div'), { className: 'stream-viewers' })
+      for (const event of ['pointerdown', 'click', 'keydown']) counter.addEventListener(event, event => event.stopPropagation())
+      tile.append(counter)
+    }
+    updateStreamViewers(counter, stream)
+  }
 }
 
 function renderFocusedStreamVolume(useGrid: boolean): void {
@@ -775,10 +882,9 @@ function syncFocusedStreamVolume(): void {
 }
 
 function renderGrid(active: boolean): void {
-  // A hidden local preview remains in the overview as an available stream so
-  // its owner can restore it by clicking the card.
-  const visibleStreams = streams
-  const signature = active ? JSON.stringify({ participants, localPreviewHidden: hideLocalPreview, streams: visibleStreams.map((stream) => [stream.id, stream.subscribed, stream.muted, streamVolumes.get(stream.id) ?? 1]) }) : ''
+  const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
+  const visibleParticipants = participants.filter((participant) => !hideLocalPreview || !participant.local)
+  const signature = active ? JSON.stringify({ participants: visibleParticipants, streams: visibleStreams.map((stream) => [stream.id, stream.subscribed, stream.muted, streamVolumes.get(stream.id) ?? 1]) }) : ''
   if (signature === lastGridSignature) return
   lastGridSignature = signature
   if (!active) {
@@ -789,10 +895,10 @@ function renderGrid(active: boolean): void {
   }
   const targets = new Map<string, HTMLVideoElement>()
   const tiles = document.createDocumentFragment()
-  const orderedParticipants = [...participants].sort((left, right) => {
+  const orderedParticipants = [...visibleParticipants].sort((left, right) => {
     const rank = (participant: RoomParticipant): number => {
       const stream = visibleStreams.find((candidate) => candidate.participantId === participant.id)
-      return stream?.subscribed && !(stream.local && hideLocalPreview) ? 0 : stream ? 1 : 2
+      return stream?.subscribed ? 0 : stream ? 1 : 2
     }
     const group = rank(left) - rank(right)
     if (group !== 0) return group
@@ -801,7 +907,8 @@ function renderGrid(active: boolean): void {
   for (const participant of orderedParticipants) {
     const stream = visibleStreams.find((candidate) => candidate.participantId === participant.id)
     const tile = Object.assign(document.createElement('article'), { className: 'grid-tile' })
-    if (stream && stream.subscribed && !(stream.local && hideLocalPreview)) {
+    if (stream) tile.dataset.streamId = stream.id
+    if (stream && stream.subscribed) {
       tile.classList.add('is-stream')
       tile.tabIndex = 0
       tile.setAttribute('role', 'button')
@@ -855,7 +962,6 @@ function renderGrid(active: boolean): void {
     } else if (stream) {
       tile.classList.add('is-stream', 'is-available')
       const watch = () => {
-        if (stream.local) hideLocalPreview = false
         selectedStreamId = stream.id; watchStream(stream.id); selectStream(stream.id); renderChrome()
       }
       tile.addEventListener('click', watch)
@@ -913,9 +1019,9 @@ function renderMembers(): void {
     if (participant.local) member.title = 'You'
     else {
       const mute = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-button member-voice-mute', innerHTML: icon('mic') })
-      mute.addEventListener('click', () => {
-        const state = voiceState.participants.find(person => person.id === participant.id)
-        setVoiceParticipantMuted(participant.id, !state?.locallyMuted)
+      mute.addEventListener('click', (event) => {
+        event.stopPropagation()
+        toggleParticipantAudio(participant.id)
       })
       actions.append(mute)
       const whisper = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-button member-whisper', innerHTML: icon('chat') })
@@ -932,11 +1038,80 @@ function renderMembers(): void {
   syncVoiceUI()
 }
 
+function rememberParticipantPreferences(people: RoomParticipant[], volume?: number): void {
+  if (!participantPreferenceServer) return
+  const updates: ParticipantPreferenceUpdate[] = []
+  for (const person of people) {
+    if (person.local) continue
+    const previous = participantPreferences.get(person.id)
+    const next = { name: person.name, volume: volume ?? previous?.volume ?? 1 }
+    if (previous?.name === next.name && previous.volume === next.volume) continue
+    participantPreferences.set(person.id, next)
+    updates.push({ id: person.id, ...next })
+  }
+  if (!updates.length) return
+  const write = window.sharescreen.saveParticipantPreferences({ server: participantPreferenceServer, participants: updates }).then(result => {
+    if (!result.ok) throw new Error(result.error)
+  }).catch(error => showNote(stageNote, `Could not save participant volumes: ${messageOf(error)}`, 'error'))
+  participantPreferenceWrites.add(write)
+  void write.finally(() => participantPreferenceWrites.delete(write))
+}
+
+function participantAudioMember(): HTMLElement | undefined {
+  return [...membersList.querySelectorAll<HTMLElement>('[data-participant-id]')].find(member => member.dataset.participantId === participantAudioId)
+}
+
+function closeParticipantAudio(): void {
+  participantAudioId = null
+  if (participantAudio.matches(':popover-open')) participantAudio.hidePopover()
+  for (const trigger of membersList.querySelectorAll('[aria-controls="participant-audio"]')) trigger.setAttribute('aria-expanded', 'false')
+}
+
+function toggleParticipantAudio(id: string): void {
+  if (participantAudioId === id) { closeParticipantAudio(); return }
+  participantAudioId = id
+  syncVoiceUI()
+  if (!participantAudioId) return
+  if (!participantAudio.matches(':popover-open')) participantAudio.showPopover()
+  positionParticipantAudio()
+  participantAudioSlider.focus()
+}
+
+function positionParticipantAudio(): void {
+  if (!participantAudioId) return
+  const member = participantAudioMember()
+  if (!member || membersPanel.hidden || roomSidebar.hidden || document.body.classList.contains('theater')) { closeParticipantAudio(); return }
+  const bounds = member.getBoundingClientRect()
+  const panel = membersPanel.getBoundingClientRect()
+  const list = membersList.getBoundingClientRect()
+  if (bounds.bottom <= Math.max(panel.top, list.top) || bounds.top >= Math.min(panel.bottom, list.bottom)) { closeParticipantAudio(); return }
+  participantAudio.style.width = `${Math.min(220, bounds.width)}px`
+  participantAudio.style.left = `${Math.max(8, Math.min(bounds.right - participantAudio.offsetWidth, window.innerWidth - participantAudio.offsetWidth - 8))}px`
+  participantAudio.style.top = `${bounds.bottom + 4}px`
+}
+
+function syncParticipantAudio(): void {
+  if (!participantAudioId) return
+  const participant = participants.find(person => person.id === participantAudioId && !person.local)
+  if (!participant || !currentRoom || connection !== 'connected' || !voiceState.enabled) { closeParticipantAudio(); return }
+  const state = voiceState.participants.find(person => person.id === participantAudioId)
+  const value = Math.round((state?.volume ?? 1) * 100)
+  participantAudio.setAttribute('aria-label', `Audio for ${participant.name}`)
+  participantAudioSlider.value = String(value)
+  participantAudioSlider.setAttribute('aria-label', `Volume for ${participant.name}`)
+  participantAudioSlider.title = `Volume for ${participant.name}: ${value}%`
+  participantAudioValue.value = `${value}%`
+  setButtonIcon(participantAudioMute, state?.locallyMuted ? 'volume-off' : 'volume')
+  participantAudioMute.setAttribute('aria-pressed', String(state?.locallyMuted === true))
+  labelButton(participantAudioMute, `${state?.locallyMuted ? 'Unmute' : 'Mute'} ${participant.name} for you`)
+  positionParticipantAudio()
+}
+
 function syncVoiceUI(): void {
   const available = Boolean(currentRoom) && connection === 'connected' && voiceState.enabled
   for (const id of ['voice-mute', 'voice-focus-mute']) {
     const button = byId(id, HTMLButtonElement)
-    button.disabled = !available || voiceState.busy || voiceState.deafened
+    button.disabled = !available || voiceState.busy || voiceState.deafened || loopbackRequested
     button.classList.toggle('is-muted', voiceState.muted)
     setButtonIcon(button, voiceState.muted ? 'mic-off' : 'mic')
     button.setAttribute('aria-pressed', String(voiceState.muted))
@@ -944,7 +1119,7 @@ function syncVoiceUI(): void {
   }
   for (const id of ['voice-deafen', 'voice-focus-deafen']) {
     const button = byId(id, HTMLButtonElement)
-    button.disabled = !available || voiceState.busy
+    button.disabled = !available || voiceState.busy || loopbackRequested
     button.classList.toggle('is-muted', voiceState.deafened)
     setButtonIcon(button, voiceState.deafened ? 'headphones-off' : 'headphones')
     button.setAttribute('aria-pressed', String(voiceState.deafened))
@@ -963,14 +1138,13 @@ function syncVoiceUI(): void {
       if (state && (state.muted || state.locallyMuted || !state.enabled)) {
         const remote = !participants.find(person => person.id === member.dataset.participantId)?.local
         const mic = Object.assign(document.createElement(remote ? 'button' : 'span'), { className: remote ? `voice-status-button${state.locallyMuted ? ' voice-local-muted' : ''}` : '', innerHTML: icon('mic-off') })
-        mic.title = state.locallyMuted ? `Unmute ${name} for you` : !state.enabled ? `${name} has voice chat disabled` : remote ? `Mute ${name} for you (microphone muted)` : `${name}'s microphone is muted`
+        mic.title = remote ? `Audio for ${name}` : `${name}'s microphone is muted`
         mic.setAttribute('aria-label', mic.title)
         if (mic instanceof HTMLButtonElement) {
           mic.type = 'button'
-          mic.addEventListener('click', () => {
-            setVoiceParticipantMuted(member.dataset.participantId!, !state.locallyMuted)
-            const next = status.querySelector<HTMLButtonElement>('button') ?? member.querySelector<HTMLButtonElement>('.member-voice-mute')
-            next?.focus()
+          mic.addEventListener('click', (event) => {
+            event.stopPropagation()
+            toggleParticipantAudio(member.dataset.participantId!)
           })
         }
         status.append(mic)
@@ -984,7 +1158,11 @@ function syncVoiceUI(): void {
     }
     const mute = member.querySelector<HTMLButtonElement>('.member-voice-mute')
     const statusButton = status.querySelector<HTMLButtonElement>('button')
-    if (statusButton) statusButton.disabled = !available
+    if (statusButton) {
+      statusButton.disabled = !available
+      statusButton.setAttribute('aria-controls', participantAudio.id)
+      statusButton.setAttribute('aria-expanded', String(participantAudioId === member.dataset.participantId))
+    }
     if (mute) {
       // The muted microphone status doubles as the local mute control. Avoid
       // reserving a second invisible microphone slot before the whisper button.
@@ -992,13 +1170,15 @@ function syncVoiceUI(): void {
       mute.disabled = !available
       mute.classList.toggle('voice-local-muted', state?.locallyMuted === true)
       setButtonIcon(mute, state?.locallyMuted ? 'mic-off' : 'mic')
-      mute.setAttribute('aria-pressed', String(state?.locallyMuted === true))
-      labelButton(mute, `${state?.locallyMuted ? 'Unmute' : 'Mute'} ${name} for you`)
+      mute.setAttribute('aria-controls', participantAudio.id)
+      mute.setAttribute('aria-expanded', String(participantAudioId === member.dataset.participantId))
+      labelButton(mute, `Audio for ${name}`)
     }
   }
   const local = voiceState.participants.find(person => participants.some(participant => participant.local && participant.id === person.id))
   elementById('profile-avatar').classList.toggle('is-speaking', local?.speaking === true)
   elementById('profile-name').classList.toggle('is-speaking', local?.speaking === true)
+  syncParticipantAudio()
 }
 
 async function changeVoice(action: () => Promise<void>): Promise<void> {
@@ -1008,9 +1188,81 @@ async function changeVoice(action: () => Promise<void>): Promise<void> {
 }
 
 function syncVoiceSettings(): void {
+  suppressionStrengthInput.disabled = !voiceEnabledInput.checked || !noiseSuppressionInput.checked
+  noiseSuppressionInput.disabled = !voiceEnabledInput.checked
   voiceInputVolume.disabled = !voiceEnabledInput.checked
   voiceInput.disabled = !voiceEnabledInput.checked
   refreshVoiceInputButton.disabled = !voiceEnabledInput.checked
+  if (!voiceEnabledInput.checked) stopMicrophoneTest()
+  voiceLoopbackButton.disabled = !voiceEnabledInput.checked
+}
+
+function syncSuppressionStrength(): void {
+  suppressionStrengthValue.value = `${suppressionStrengthInput.value}%`
+}
+
+function loopbackSettings(): LoopbackSettings {
+  return {
+    inputDeviceId: voiceInput.value || 'default', inputVolume: Number(voiceInputVolume.value) / 100,
+    noiseSuppression: noiseSuppressionInput.checked, outputDeviceId: selectedAudioOutput,
+    suppressionStrength: Number(suppressionStrengthInput.value) / 100,
+    outputVolume: Number(audioVolumeInput.value) / 100,
+  }
+}
+
+function syncMicrophoneTestButton(): void {
+  voiceLoopbackButton.setAttribute('aria-pressed', String(loopbackRequested))
+  labelButton(voiceLoopbackButton, loopbackRequested ? 'Stop microphone test' : 'Start microphone test')
+}
+
+function stopMicrophoneTest(): void {
+  const wasRequested = loopbackRequested
+  loopbackRequested = false
+  loopbackRequest++
+  microphoneLoopback?.stop()
+  syncMicrophoneTestButton()
+  syncVoiceUI()
+  if (wasRequested) void setMicrophoneTestActive(false).catch(error => showNote(stageNote, `Could not restore room voice: ${messageOf(error)}`, 'error'))
+}
+
+async function toggleMicrophoneTest(): Promise<void> {
+  if (loopbackRequested) { stopMicrophoneTest(); return }
+  if (!settingsDialog.open || !voiceEnabledInput.checked) return
+  loopbackRequested = true
+  const request = ++loopbackRequest
+  syncMicrophoneTestButton()
+  syncVoiceUI()
+  clearNote(voiceInputNote)
+  try {
+    await setMicrophoneTestActive(true)
+    if (request !== loopbackRequest) return
+    const { MicrophoneLoopback } = await import('./microphone-loopback')
+    if (request !== loopbackRequest || !settingsDialog.open || !voiceEnabledInput.checked) return
+    microphoneLoopback ??= new MicrophoneLoopback()
+    await microphoneLoopback.start(loopbackSettings())
+  } catch (error) {
+    if (request !== loopbackRequest) return
+    stopMicrophoneTest()
+    showNote(voiceInputNote, `Could not test microphone: ${messageOf(error)}`, 'error')
+  }
+}
+
+async function updateMicrophoneTest(): Promise<void> {
+  if (!loopbackRequested || !microphoneLoopback) return
+  const request = loopbackRequest
+  try { await microphoneLoopback.configure(loopbackSettings()) }
+  catch (error) {
+    if (request !== loopbackRequest) return
+    stopMicrophoneTest()
+    showNote(voiceInputNote, `Could not test microphone: ${messageOf(error)}`, 'error')
+  }
+}
+
+async function previewVoiceSettings(): Promise<void> {
+  if (!currentRoom) return
+  try {
+    await configureVoice({ enabled: voiceEnabledInput.checked, inputDeviceId: savedConfig?.voiceInputDeviceId || 'default', noiseSuppression: noiseSuppressionInput.checked, suppressionStrength: Number(suppressionStrengthInput.value) / 100 })
+  } catch (error) { showNote(settingsNote, messageOf(error), 'error') }
 }
 
 async function loadVoiceInputs(): Promise<void> {
@@ -1082,6 +1334,7 @@ function syncAudioVolume(): void {
   audioVolumeValue.textContent = `${value}%`
   audioVolumeInput.title = `Global incoming audio volume: ${value}%`
   setRemoteAudioVolume(value / 100)
+  void updateMicrophoneTest()
 }
 
 let audioDevicesRequest: Promise<MediaDeviceInfo[]> | null = null
@@ -1105,6 +1358,7 @@ async function loadAudioOutputs(): Promise<void> {
       }))
     })
     audioOutputInput.value = selectedAudioOutput
+    if (!selectionExists) void updateMicrophoneTest()
     audioOutputNote.hidden = true
   } catch (error) {
     audioOutputNote.hidden = false
@@ -1118,6 +1372,7 @@ async function onAudioOutputChanged(): Promise<void> {
   try {
     await setRemoteAudioOutputDevice(next)
     selectedAudioOutput = next
+    void updateMicrophoneTest()
     audioOutputNote.hidden = true
   } catch (error) {
     audioOutputInput.value = previous
@@ -1220,7 +1475,7 @@ async function persistConfig(): Promise<AppConfig | null> {
     fillForm(saved.value); return saved.value
   } catch (error) { openServerSettings(); showNote(serverNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: updateChannelInput.value === 'beta' ? 'beta' : 'stable', showChatBubbles: showChatBubblesInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100 } }
+function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: updateChannelInput.value === 'beta' ? 'beta' : 'stable', showChatBubbles: showChatBubblesInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100 } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
   urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
@@ -1231,6 +1486,9 @@ function fillForm(config: AppConfig): void {
   showStreamStatisticsInput.checked = showStatistics
   showChatBubblesInput.checked = config.showChatBubbles === true
   voiceEnabledInput.checked = config.voiceEnabled !== false
+  noiseSuppressionInput.checked = config.voiceNoiseSuppression !== false
+  suppressionStrengthInput.value = String(Math.round((config.voiceSuppressionStrength ?? .8) * 100))
+  syncSuppressionStrength()
   const inputDeviceId = config.voiceInputDeviceId || 'default'
   if (![...voiceInput.options].some(option => option.value === inputDeviceId)) voiceInput.append(Object.assign(document.createElement('option'), { value: inputDeviceId, textContent: 'Saved microphone' }))
   voiceInput.value = inputDeviceId
@@ -1250,6 +1508,7 @@ function openSettings(): void {
   void loadVoiceInputs()
 }
 function selectSettingsTab(name: string): void {
+  if (name !== 'audio') stopMicrophoneTest()
   settingsDialog.querySelectorAll<HTMLButtonElement>('[data-settings-tab]').forEach(tab => {
     const selected = tab.dataset.settingsTab === name
     tab.setAttribute('aria-selected', String(selected))
@@ -1262,6 +1521,7 @@ function syncVoiceInputVolume(): void {
   const value = Math.max(0, Math.min(100, Number(voiceInputVolume.value)))
   voiceInputVolumeValue.value = `${value}%`
   setVoiceInputVolume(value / 100)
+  void updateMicrophoneTest()
 }
 function openServerSettings(): void { clearNote(serverNote); if (!serverDialog.open) serverDialog.showModal() }
 function syncScreenControlsVisibility(hasVideo: boolean): void {
@@ -1291,6 +1551,7 @@ function hideScreenControls(): void {
 }
 
 function setTheater(active: boolean): void {
+  if (active) closeParticipantAudio()
   document.body.classList.toggle('theater', active)
   labelButton(theaterButton, active ? 'Exit focus' : 'Focus view')
   elementById('exit-focus').hidden = !active

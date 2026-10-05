@@ -1,7 +1,7 @@
 // Validate production telemetry against full browser reports, including fields
 // omitted by LiveKit's convenience wrappers and a subscription still pending.
-const { app, BrowserWindow } = require('electron')
-const { build } = require('esbuild')
+const { app, BrowserWindow } = require('./silent-electron.cjs')
+const { build } = require('./build-renderer.cjs')
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
 const path = require('node:path')

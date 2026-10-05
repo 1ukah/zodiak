@@ -1,6 +1,6 @@
 import {
-  ArrowRight, Check, Eye, EyeOff, Headphones, HeadphoneOff, Mic, MicOff, LayoutGrid,
-  LoaderCircle, LogOut, Maximize, Minimize, Monitor, MonitorUp, PanelLeftClose,
+  ArrowRight, ChevronLeft, ChevronRight, Check, Eye, EyeOff, Headphones, HeadphoneOff, Mic, MicOff, LayoutGrid,
+  Clock, Download, LoaderCircle, LogOut, Maximize, Minimize, Monitor, MonitorUp, PanelLeftClose,
   PictureInPicture2, Plus, RotateCw, Search, Server, Settings, Square, Users,
   Volume2, VolumeX, X, MessageCircle, Send, UserRound, Keyboard, Hash, LockKeyhole, ArrowDown, ExternalLink, Play, createElement, type IconNode,
 } from 'lucide'
@@ -16,6 +16,9 @@ const icons: Record<string, IconNode> = {
   'volume-off': VolumeX, loader: LoaderCircle,
   chat: MessageCircle, send: Send, account: UserRound, keyboard: Keyboard,
   hash: Hash, private: LockKeyhole, down: ArrowDown, link: ExternalLink, play: Play,
+  download: Download, later: Clock,
+  attach: Plus,
+  previous: ChevronLeft, next: ChevronRight,
 }
 
 const markup = new Map<string, string>()

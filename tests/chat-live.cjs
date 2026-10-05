@@ -1,7 +1,7 @@
 // Four real Electron clients exercise production tokens/session against LiveKit.
 // Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET; no credentials are saved in the repo.
-const { app, BrowserWindow } = require('electron')
-const { build } = require('esbuild')
+const { app, BrowserWindow } = require('./silent-electron.cjs')
+const { build } = require('./build-renderer.cjs')
 const { RoomServiceClient } = require('livekit-server-sdk')
 const fs = require('node:fs/promises')
 const path = require('node:path')
@@ -42,7 +42,13 @@ window.chatTest = {
       onViewers(){},onStreams(){},onTelemetry(){},onAudioBlocked(){},onError(message){errors.push(message)}
     }})
   }, send:sendChatMessage, rename:updateDisplayName, leave:leaveRoom,
-  snapshot(){return {messages,participants,connection,roomLosses,errors}}
+  sendImage(text,recipient){
+    const png=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='),c=>c.charCodeAt(0));
+    const bytes=new Uint8Array(180000);bytes.set(png);bytes[bytes.length-1]=123;
+    return sendChatMessage(text,recipient,[new File([bytes],'test.png',{type:'image/png'})]);
+  },
+  async snapshot(){return {messages:messages.map(message=>({...message,images:message.images?.map(({blob,...info})=>info)})),
+    images:await Promise.all(messages.flatMap(message=>message.images??[]).map(async image=>({size:image.blob.size,lastByte:new Uint8Array(await image.blob.arrayBuffer()).at(-1)}))),participants,connection,roomLosses,errors}}
 }
 `
 app.whenReady().then(async () => {
@@ -52,13 +58,14 @@ app.whenReady().then(async () => {
   await fs.writeFile(path.join(app.getPath('userData'), 'config.json'), JSON.stringify({ url, apiKey, apiSecret, displayName:'Chat test' }))
   // Compile the actual token issuer and parser, not a duplicate grant in the test.
   await build({ entryPoints:[path.join(root, 'src/main/tokens.ts')], bundle:true, platform:'node', format:'cjs', external:['electron'], outfile:path.join(temp,'tokens.cjs') })
-  const { createParticipantToken } = require(path.join(temp, 'tokens.cjs'))
+  const { createTokenIssuer } = require('./isolated-token-issuer.cjs')
   client = new RoomServiceClient(url.replace(/^ws/, 'http'), apiKey, apiSecret, { requestTimeout: 8 })
   await client.createRoom({ name: roomName }); await client.createRoom({ name: otherRoom })
   await build({ stdin:{contents:harness, resolveDir:path.join(root,'src/renderer/src'), sourcefile:'chat-live-harness.ts'}, bundle:true, format:'iife', outfile:path.join(temp,'harness.js') })
   await fs.writeFile(path.join(temp,'index.html'), '<!doctype html><script src="./harness.js"></script>')
   const tokens = []
   for (const [index, name] of ['Alice','Bob','Carol','Dave'].entries()) {
+    const { createParticipantToken } = await createTokenIssuer(path.join(temp,'tokens.cjs'),path.join(temp,'clients',String(index)),{url,apiKey,apiSecret})
     const issued = await createParticipantToken({ role:'viewer', displayName:name, room:index===3 ? otherRoom : roomName })
     const claims = JSON.parse(Buffer.from(issued.token.split('.')[1], 'base64url').toString())
     assert.equal(claims.video.canPublishData, true)
@@ -99,6 +106,22 @@ app.whenReady().then(async () => {
   assert.equal((await snapshot(1)).messages.at(-1).text.length,2000)
   await assert.rejects(run(0,`window.chatTest.send('x'.repeat(2001))`), /2000/)
   console.log('PASS Unicode messages fit the packet budget and oversize messages are rejected')
+  const beforeImages = await Promise.all([snapshot(0),snapshot(1),snapshot(2),snapshot(3)])
+  await run(0,`window.chatTest.sendImage('Public image')`)
+  for(let attempt=0;attempt<50;attempt++) { if((await snapshot(1)).images.length===1 && (await snapshot(2)).images.length===1) break; await pause(100) }
+  assert.deepEqual((await snapshot(1)).images,[{size:180000,lastByte:123}])
+  assert.deepEqual((await snapshot(2)).images,[{size:180000,lastByte:123}])
+  assert.equal((await snapshot(1)).messages.at(-1).text,'Public image')
+  assert.equal((await snapshot(3)).messages.length,beforeImages[3].messages.length)
+  console.log('PASS Chunked public image and caption reach the room with intact bytes, never another room')
+  await run(0,`window.chatTest.sendImage('',${JSON.stringify(tokens[1].identity)})`)
+  for(let attempt=0;attempt<50;attempt++) { if((await snapshot(1)).images.length===2) break; await pause(100) }
+  assert.equal((await snapshot(1)).messages.at(-1).text,'')
+  assert.equal((await snapshot(1)).messages.at(-1).recipient,tokens[1].identity)
+  assert.deepEqual((await snapshot(1)).images.at(-1),{size:180000,lastByte:123})
+  assert.equal((await snapshot(2)).images.length,1)
+  assert.equal((await snapshot(3)).images.length,0)
+  console.log('PASS Image-only whisper reaches its intended recipient with intact bytes')
   await run(1,'window.chatTest.leave()'); await pause(500)
   await assert.rejects(run(0,`window.chatTest.send('Gone',${JSON.stringify(tokens[1].identity)})`), /left the room/)
   console.log('PASS Sending a whisper to a departed recipient fails visibly')

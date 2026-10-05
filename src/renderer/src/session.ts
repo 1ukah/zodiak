@@ -13,7 +13,7 @@ import {
 } from 'livekit-client'
 import { shareBitrateFor, type SharePriority, type ShareQuality } from '../../shared/types'
 import { closeSystemAudio, openSystemAudioTrack } from './system-audio'
-import { CHAT_MAX_BYTES, CHAT_MAX_LENGTH, CHAT_TOPIC, parseChatPacket, type ChatMessage, type ChatPacket } from '../../shared/chat'
+import { CHAT_MAX_BYTES, CHAT_MAX_LENGTH, CHAT_TOPIC, CHAT_IMAGE_TOPIC, CHAT_IMAGE_BATCH_MAX_BYTES, CHAT_IMAGE_MAX_COUNT, CHAT_IMAGE_PACKET_MAX_BYTES, parseChatPacket, parseChatImagePacket, validateChatImage, type ChatMessage, type ChatPacket, type ChatImage, type ChatImagePacket } from '../../shared/chat'
 import { RoomVoice, type VoiceSettings, type VoiceState } from './voice'
 
 export interface MediaTargets {
@@ -40,6 +40,7 @@ export interface ScreenStream {
   muted: boolean
   /** A remote stream is only decoded after the viewer explicitly watches it. */
   subscribed: boolean
+  viewers: RoomParticipant[]
 }
 
 export interface StreamMetric {
@@ -94,6 +95,7 @@ export interface SessionHooks {
 }
 
 interface StreamRecord extends ScreenStream {
+  sid: string
   track?: LocalVideoTrack | RemoteVideoTrack
   publication?: RemoteTrackPublication
 }
@@ -120,6 +122,7 @@ export function setVoiceInputVolume(volume: number): void { voice?.setInputVolum
 export async function setVoiceMuted(muted: boolean): Promise<void> { await voice?.setMuted(muted) }
 export async function setVoiceDeafened(deafened: boolean): Promise<void> { await voice?.setDeafened(deafened) }
 export function setVoiceParticipantMuted(id: string, muted: boolean): void { voice?.setParticipantMuted(id, muted) }
+export function setVoiceParticipantVolume(id: string, volume: number): void { voice?.setParticipantVolume(id, volume) }
 let targets: MediaTargets | null = null
 let hooks: SessionHooks | null = null
 let suppressDisconnectError = false
@@ -134,6 +137,7 @@ let remoteAudioTracks = new Map<string, RemoteTrack>()
 let remoteAudioGraphs = new Map<string, RemoteAudioGraph>()
 let audioContext: AudioContext | null = null
 let remoteAudioVolume = 1
+let microphoneTestActive = false
 let remoteStreamVolumes = new Map<string, number>()
 let remoteAudioOutputDeviceId = ''
 let gridTargets = new Map<string, HTMLVideoElement>()
@@ -151,6 +155,9 @@ let localScreenTargetBitrate: number | undefined
 let localParticipantName: string | undefined
 const receivedChatIds = new Set<string>()
 const participantNameCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
+const WATCHING_ATTRIBUTE = 'zodiak.watching'
+let watchingSyncRoom: Room | null = null
+let lastWatchingValue: string | null = null
 
 interface CounterSample {
   bytes: number
@@ -193,6 +200,7 @@ export async function joinRoom(args: {
         blocked => { voiceAudioBlocked = blocked; hooks?.onAudioBlocked(screenAudioBlocked || voiceAudioBlocked) })
       await voice.setOutputDevice(remoteAudioOutputDeviceId || 'default')
       voice.setOutputVolume(remoteAudioVolume)
+      await voice.setTesting(microphoneTestActive)
       await voice.start()
     }
   } catch (error) {
@@ -242,7 +250,7 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
       },
     )
     const track = publication?.track
-    if (!track || track.kind !== Track.Kind.Video) {
+    if (!track || track.kind !== Track.Kind.Video || track.mediaStreamTrack.readyState !== 'live') {
       throw new Error('Screen share did not start. Choose a screen and try again.')
     }
     localScreenTargetBitrate = shareBitrateFor(quality)
@@ -253,11 +261,18 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
         stream: 'screen',
       })
     }
+    // The selected window can close while either publication is pending.
+    // Do not let a late audio publication outlive its video.
+    if (room !== current || current.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track !== track || track.mediaStreamTrack.readyState !== 'live') {
+      throw new Error('The shared screen or window closed before sharing started.')
+    }
     refreshStreams(current)
   } catch (error) {
     localScreenTargetBitrate = undefined
-    await current.localParticipant.setScreenShareEnabled(false).catch(() => undefined)
-    await closeSystemAudio()
+    await Promise.all([
+      stopScreenAudio(current),
+      current.localParticipant.setScreenShareEnabled(false),
+    ]).catch(() => undefined)
     throw new Error(captureMessage(error))
   }
 }
@@ -271,25 +286,64 @@ export async function updateDisplayName(name: string): Promise<void> {
   refreshStreams(current)
 }
 
-export async function sendChatMessage(text: string, recipient?: string): Promise<ChatMessage> {
+export async function sendChatMessage(text: string, recipient?: string, images: File[] = []): Promise<ChatMessage> {
   const current = requireRoom()
   if (current.state !== ConnectionState.Connected) throw new Error('Wait for the room to reconnect.')
-  if (!text.trim() || text.length > CHAT_MAX_LENGTH) throw new Error(`Messages can contain up to ${CHAT_MAX_LENGTH} characters.`)
+  if ((!text.trim() && !images.length) || text.length > CHAT_MAX_LENGTH) throw new Error(`Messages can contain up to ${CHAT_MAX_LENGTH} characters.`)
+  if (images.length > CHAT_IMAGE_MAX_COUNT) throw new Error(`You can attach up to ${CHAT_IMAGE_MAX_COUNT} images per message.`)
+  for (const image of images) await validateChatImage(image)
+  if (room !== current || current.state !== ConnectionState.Connected) throw new Error('Wait for the room to reconnect.')
   if (recipient && !current.remoteParticipants.has(recipient)) throw new Error('This person has left the room.')
   const packet: ChatPacket = { version: 1, id: crypto.randomUUID(), text: text.trim(), timestamp: Date.now(), ...(recipient ? { recipient } : {}) }
-  const data = new TextEncoder().encode(JSON.stringify(packet))
-  if (data.byteLength > CHAT_MAX_BYTES) throw new Error('This message is too large.')
-  await current.localParticipant.publishData(data, { reliable: true, topic: CHAT_TOPIC, ...(recipient ? { destinationIdentities: [recipient] } : {}) })
+  const attachments = images.map(image => ({ name: image.name.slice(0, 256) || 'image', mimeType: image.type, size: image.size, blob: image }))
+  if (images.length) {
+    const imagePacket: ChatImagePacket = { ...packet, images: attachments.map(({ blob: _blob, ...info }) => info) }
+    const metadata = JSON.stringify(imagePacket)
+    if (new TextEncoder().encode(metadata).byteLength > CHAT_IMAGE_PACKET_MAX_BYTES) throw new Error('This message is too large.')
+    // One bounded stream carries the ordered images as one message and caption.
+    const writer = await current.localParticipant.streamBytes({ topic: CHAT_IMAGE_TOPIC, streamId: packet.id,
+      name: 'Chat images', mimeType: 'application/octet-stream', totalSize: images.reduce((total, image) => total + image.size, 0),
+      attributes: { message: metadata }, ...(recipient ? { destinationIdentities: [recipient] } : {}) })
+    try {
+      for (const image of images) for (let offset = 0; offset < image.size; offset += 64 * 1024) {
+        if (room !== current || current.state !== ConnectionState.Connected) throw new Error('You left the room before the images were sent.')
+        await writer.write(new Uint8Array(await image.slice(offset, offset + 64 * 1024).arrayBuffer()))
+      }
+    } finally { await writer.close() }
+  } else {
+    const data = new TextEncoder().encode(JSON.stringify(packet))
+    if (data.byteLength > CHAT_MAX_BYTES) throw new Error('This message is too large.')
+    await current.localParticipant.publishData(data, { reliable: true, topic: CHAT_TOPIC, ...(recipient ? { destinationIdentities: [recipient] } : {}) })
+  }
   if (room !== current) throw new Error('You left the room before the message was sent.')
-  return { ...packet, senderId: current.localParticipant.identity, senderName: displayNameForLocal(current), local: true }
+  if (current.state !== ConnectionState.Connected) throw new Error('Wait for the room to reconnect.')
+  return { ...packet, senderId: current.localParticipant.identity, senderName: displayNameForLocal(current), local: true,
+    ...(attachments.length ? { images: attachments } : {}) }
 }
 
 export async function unpublishScreen(): Promise<void> {
   const current = requireRoom()
-  await current.localParticipant.setScreenShareEnabled(false)
   localScreenTargetBitrate = undefined
-  await closeSystemAudio()
-  refreshStreams(current)
+  try {
+    await Promise.all([
+      stopScreenAudio(current),
+      current.localParticipant.setScreenShareEnabled(false),
+    ])
+  } finally {
+    if (room === current) refreshStreams(current)
+  }
+}
+
+async function stopScreenAudio(current: Room): Promise<void> {
+  const audio = current.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)?.track
+  // Stop capture immediately, before waiting for any signaling. LiveKit's
+  // setScreenShareEnabled(false) only removes audio if video still exists.
+  const closing = closeSystemAudio()
+  await Promise.all([
+    closing,
+    window.sharescreen?.setSharing(false),
+    audio ? current.localParticipant.unpublishTrack(audio, true) : undefined,
+  ])
 }
 
 export function selectStream(id: string | null): void {
@@ -380,6 +434,13 @@ export function setRemoteAudioVolume(volume: number): void {
   remoteAudio.forEach((element, identity) => applyAudioVolume(identity, element))
 }
 
+/** Silence room capture and all incoming audio while a local microphone test plays. */
+export async function setMicrophoneTestActive(active: boolean): Promise<void> {
+  microphoneTestActive = active
+  remoteAudio.forEach((element, identity) => applyAudioVolume(identity, element))
+  await voice?.setTesting(active)
+}
+
 /** Routes remote stream audio to a Windows output device when Chromium supports it. */
 export async function setRemoteAudioOutputDevice(deviceId: string): Promise<void> {
   const previous = remoteAudioOutputDeviceId
@@ -421,7 +482,7 @@ export async function leaveRoom(): Promise<void> {
   room = null
   suppressDisconnectError = true
   try {
-    if (current) await current.disconnect()
+    await Promise.all([closeSystemAudio(), current?.disconnect()])
   } finally {
     suppressDisconnectError = false
     clearMedia()
@@ -434,6 +495,56 @@ function requireRoom(): Room {
 }
 
 function bindRoom(next: Room): void {
+  const receivingImages = new Set<AbortController>()
+  let receivingBytes = 0
+  next.registerByteStreamHandler(CHAT_IMAGE_TOPIC, (reader, sender) => {
+    const participant = next.remoteParticipants.get(sender.identity)
+    const metadata = reader.info.attributes?.message
+    const packet = typeof metadata === 'string' && metadata.length <= CHAT_IMAGE_PACKET_MAX_BYTES ? parseChatImagePacket(new TextEncoder().encode(metadata)) : null
+    const expectedSize = packet?.images.reduce((total, image) => total + image.size, 0) ?? 0
+    if (room !== next || next.state !== ConnectionState.Connected || !participant || !packet || receivingImages.size >= 4
+      || receivingBytes + expectedSize > CHAT_IMAGE_BATCH_MAX_BYTES || packet.id !== reader.info.id || expectedSize !== reader.info.size
+      || (reader.info.mimeType !== 'application/octet-stream' && !(packet.images.length === 1 && reader.info.mimeType === packet.images[0].mimeType))
+      || (packet.recipient && packet.recipient !== next.localParticipant.identity)) return
+    const key = `${participant.identity}:${packet.id}`
+    if (receivedChatIds.has(key)) return
+    receivedChatIds.add(key)
+    if (receivedChatIds.size > 5_000) receivedChatIds.delete(receivedChatIds.values().next().value!)
+    const controller = new AbortController(); receivingImages.add(controller); receivingBytes += expectedSize
+    void (async () => {
+      try {
+        let chunks: ArrayBuffer[] = []
+        const images: ChatImage[] = []
+        let imageSize = 0
+        let size = 0
+        for await (const chunk of reader.withAbortSignal(AbortSignal.any([controller.signal, AbortSignal.timeout(300_000)]))) {
+          if (room !== next || next.state !== ConnectionState.Connected) return
+          size += chunk.byteLength
+          if (size > expectedSize) return
+          let offset = 0
+          while (offset < chunk.byteLength) {
+            const info = packet.images[images.length]
+            if (!info) return
+            const length = Math.min(chunk.byteLength - offset, info.size - imageSize)
+            chunks.push(chunk.slice(offset, offset + length).buffer)
+            imageSize += length; offset += length
+            if (imageSize === info.size) {
+              const blob = new Blob(chunks, { type: info.mimeType }); chunks = []; imageSize = 0
+              await validateChatImage(blob)
+              images.push({ ...info, blob })
+            }
+          }
+        }
+        if (controller.signal.aborted || size !== expectedSize || room !== next || next.state !== ConnectionState.Connected) return
+        if (images.length !== packet.images.length) return
+        if (controller.signal.aborted || room !== next || next.state !== ConnectionState.Connected) return
+        hooks?.onChatMessage({ ...packet, images,
+          timestamp: Math.abs(Date.now() - packet.timestamp) < 300_000 ? packet.timestamp : Date.now(),
+          senderId: participant.identity, senderName: participant.name || participant.identity, local: false })
+      } catch { /* Discard the entire message if any image or stream is invalid. */ }
+      finally { receivingImages.delete(controller); receivingBytes -= expectedSize }
+    })()
+  })
   next.on(RoomEvent.DataReceived, (data, participant, _kind, topic) => {
     if (room !== next || topic !== CHAT_TOPIC || !participant) return
     const packet = parseChatPacket(data)
@@ -445,6 +556,7 @@ function bindRoom(next: Room): void {
     hooks?.onChatMessage({ ...packet, timestamp: Math.abs(Date.now() - packet.timestamp) < 300_000 ? packet.timestamp : Date.now(), senderId: participant.identity, senderName: participant.name || participant.identity, local: false })
   })
   next.on(RoomEvent.ConnectionStateChanged, (state) => {
+    if (state !== ConnectionState.Connected) for (const controller of receivingImages) controller.abort()
     if (room !== next) return
     hooks?.onConnection(toPresence(state))
     if (state === ConnectionState.Connected) refreshRoomState(next)
@@ -458,8 +570,11 @@ function bindRoom(next: Room): void {
   next.on(RoomEvent.ParticipantNameChanged, () => {
     if (room === next) refreshRoomState(next)
   })
+  next.on(RoomEvent.ParticipantAttributesChanged, (changed) => {
+    if (room === next && WATCHING_ATTRIBUTE in changed) emitStreams()
+  })
   next.on(RoomEvent.Reconnected, () => {
-    if (room === next) { refreshRoomState(next); void refreshRoster(next) }
+    if (room === next) { lastWatchingValue = null; refreshRoomState(next); void refreshRoster(next) }
   })
   next.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
     if (room !== next) return
@@ -480,8 +595,15 @@ function bindRoom(next: Room): void {
   next.on(RoomEvent.LocalTrackPublished, () => {
     if (room === next) refreshStreams(next)
   })
-  next.on(RoomEvent.LocalTrackUnpublished, () => {
-    if (room === next) refreshStreams(next)
+  next.on(RoomEvent.LocalTrackUnpublished, (publication) => {
+    if (room !== next) return
+    if (publication.source === Track.Source.ScreenShare) {
+      localScreenTargetBitrate = undefined
+      void stopScreenAudio(next).catch((error: unknown) => {
+        if (room === next) hooks?.onError(error instanceof Error ? error.message : 'Could not stop screen audio')
+      })
+    }
+    refreshStreams(next)
   })
   next.on(RoomEvent.Disconnected, (reason) => {
     if (room !== next) return
@@ -523,7 +645,48 @@ function refreshStreams(current: Room): void {
 }
 
 function emitStreams(): void {
-  hooks?.onStreams([...streams.values()].map(({ track: _track, publication: _publication, ...stream }) => stream))
+  const current = room
+  if (!current) return
+  const watchers = [...current.remoteParticipants.values()].map(participant => {
+    let watching: string[] = []
+    try {
+      const value: unknown = JSON.parse(participant.attributes[WATCHING_ATTRIBUTE] || '[]')
+      if (Array.isArray(value) && value.length <= 512 && value.every(sid => typeof sid === 'string')) watching = value
+    } catch { /* Ignore malformed presence from other clients. */ }
+    return { person: { id: participant.identity, name: participant.name || participant.identity, local: false }, watching }
+  })
+  hooks?.onStreams([...streams.values()].map(({ sid, track: _track, publication: _publication, ...stream }) => {
+    const viewers = watchers.filter(({ person, watching }) => person.id !== stream.participantId && watching.includes(sid)).map(({ person }) => person)
+    if (!stream.local && stream.subscribed) viewers.push({ id: current.localParticipant.identity, name: displayNameForLocal(current), local: true })
+    viewers.sort((a, b) => participantNameCollator.compare(a.name, b.name) || a.id.localeCompare(b.id))
+    return { ...stream, viewers }
+  }))
+  void syncWatchingAttribute(current)
+}
+
+function watchingAttributeValue(): string {
+  const sids = [...streams.values()].filter(stream => !stream.local && stream.subscribed).map(stream => stream.sid).sort()
+  return sids.length ? JSON.stringify(sids) : ''
+}
+
+/** Durable room presence also reaches late joiners, without polling or heartbeats. */
+async function syncWatchingAttribute(current: Room): Promise<void> {
+  if (room !== current || current.state !== ConnectionState.Connected || watchingSyncRoom === current) return
+  watchingSyncRoom = current
+  try {
+    // Serialize updates so a quick watch/hide cannot leave stale presence behind.
+    while (room === current && current.state === ConnectionState.Connected) {
+      const value = watchingAttributeValue()
+      if (value === lastWatchingValue) break
+      await current.localParticipant.setAttributes({ [WATCHING_ATTRIBUTE]: value })
+      if (room !== current) return
+      lastWatchingValue = value
+    }
+  } catch (error) {
+    if (room === current) hooks?.onError(error instanceof Error ? error.message : 'Could not update stream viewers')
+  } finally {
+    if (watchingSyncRoom === current) watchingSyncRoom = null
+  }
 }
 
 function refreshParticipants(current: Room): void {
@@ -606,7 +769,7 @@ function addLocalStream(
   const track = publication?.track
   if (!track || track.kind !== Track.Kind.Video || track.source !== Track.Source.ScreenShare) return
   const id = `local:${publication.trackSid ?? 'screen'}`
-  destination.set(id, { id, participantId: identity, participantName: name || 'You', local: true, muted: false, subscribed: true, track: track as LocalVideoTrack })
+  destination.set(id, { id, sid: publication.trackSid, participantId: identity, participantName: name || 'You', local: true, muted: false, subscribed: true, viewers: [], track: track as LocalVideoTrack })
 }
 
 function addRemoteStream(destination: Map<string, StreamRecord>, publication: RemoteTrackPublication, participant: RemoteParticipant): void {
@@ -615,11 +778,13 @@ function addRemoteStream(destination: Map<string, StreamRecord>, publication: Re
   const id = `remote:${participant.identity}:${publication.trackSid}`
   destination.set(id, {
     id,
+    sid: publication.trackSid,
     participantId: participant.identity,
     participantName: participant.name || participant.identity,
     local: false,
     muted: mutedParticipants.has(participant.identity),
     subscribed: publication.isSubscribed && !hiddenParticipants.has(participant.identity),
+    viewers: [],
     track: track && isScreenVideo(track) ? track : undefined,
     publication,
   })
@@ -749,7 +914,7 @@ function removeRemoteAudio(identity: string): void {
 }
 
 function applyAudioVolume(identity: string, element: HTMLAudioElement): void {
-  const volume = mutedParticipants.has(identity) ? 0 : remoteAudioVolume * (remoteStreamVolumes.get(identity) ?? 1)
+  const volume = microphoneTestActive || mutedParticipants.has(identity) ? 0 : remoteAudioVolume * (remoteStreamVolumes.get(identity) ?? 1)
   const gain = remoteAudioGraphs.get(identity)?.gain
   if (gain) {
     gain.gain.value = volume
@@ -783,6 +948,7 @@ function isScreenAudio(track: RemoteTrack): boolean {
 }
 
 function clearMedia(): void {
+  void closeSystemAudio().catch(() => undefined)
   voice?.close()
   voice = null
   voiceAudioBlocked = false
@@ -809,6 +975,8 @@ function clearMedia(): void {
   remoteStreamVolumes.clear()
   localScreenTargetBitrate = undefined
   localParticipantName = undefined
+  lastWatchingValue = null
+  watchingSyncRoom = null
   if (targets) targets.video.srcObject = null
   hooks?.onStreams([])
   hooks?.onParticipants([])

@@ -1,7 +1,7 @@
 // Production tokens/session in three Electron clients against a real LiveKit server.
 // Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET. Only temporary test rooms are used.
-const { app, BrowserWindow } = require('electron')
-const { build } = require('esbuild')
+const { app, BrowserWindow } = require('./silent-electron.cjs')
+const { build } = require('./build-renderer.cjs')
 const { RoomServiceClient } = require('livekit-server-sdk')
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
@@ -58,13 +58,14 @@ app.whenReady().then(async()=>{
   await fs.mkdir(app.getPath('userData'),{recursive:true})
   await fs.writeFile(path.join(app.getPath('userData'),'config.json'),JSON.stringify({url,apiKey,apiSecret}))
   await build({entryPoints:[path.join(root,'src/main/tokens.ts')],bundle:true,platform:'node',format:'cjs',external:['electron'],outfile:path.join(temp,'tokens.cjs')})
-  const {createParticipantToken}=require(path.join(temp,'tokens.cjs'))
+  const {createTokenIssuer}=require('./isolated-token-issuer.cjs')
   client=new RoomServiceClient(url.replace(/^ws/,'http'),apiKey,apiSecret,{requestTimeout:8})
   await client.createRoom({name:roomName});await client.createRoom({name:otherRoom})
   await build({stdin:{contents:harness,resolveDir:path.join(root,'src/renderer/src'),loader:'ts'},bundle:true,format:'iife',outfile:path.join(temp,'main.js'),plugins:[{name:'voice-test-screen',setup(build){build.onLoad({filter:/[\\/]session\.ts$/},async args=>({contents:await fs.readFile(args.path,'utf8')+bridge,loader:'ts'}))}}]})
   await fs.writeFile(path.join(temp,'index.html'),'<!doctype html><script src="./main.js"></script>')
   const tokens=[]
   for(const [index,name] of ['Alice','Bob','Other room'].entries()){
+    const {createParticipantToken}=await createTokenIssuer(path.join(temp,'tokens.cjs'),path.join(temp,'clients',String(index)),{url,apiKey,apiSecret})
     const issued=await createParticipantToken({role:'viewer',displayName:name,room:index===2?otherRoom:roomName});tokens.push(issued)
     const win=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false,backgroundThrottling:false,offscreen:true}});windows.push(win)
     await win.loadFile(path.join(temp,'index.html'))

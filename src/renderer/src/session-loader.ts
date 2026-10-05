@@ -9,6 +9,7 @@ let volume = 1
 let deviceId = 'default'
 let statistics = false
 let viewerVisible = true
+let microphoneTestActive = false
 
 function load(): Promise<Engine> {
   loading ??= import('./session').then(async module => {
@@ -17,6 +18,7 @@ function load(): Promise<Engine> {
     module.setViewerVisible(viewerVisible)
     await module.setRemoteAudioOutputDevice(deviceId)
     engine = module
+    await module.setMicrophoneTestActive(microphoneTestActive)
     return module
   }).catch(error => { loading = undefined; throw error })
   return loading
@@ -35,8 +37,10 @@ export async function resumeRemoteAudio() { await engine?.resumeRemoteAudio() }
 export async function configureVoice(...args: Parameters<Engine['configureVoice']>) { await engine?.configureVoice(...args) }
 export async function setVoiceMuted(...args: Parameters<Engine['setVoiceMuted']>) { await engine?.setVoiceMuted(...args) }
 export async function setVoiceDeafened(...args: Parameters<Engine['setVoiceDeafened']>) { await engine?.setVoiceDeafened(...args) }
+export async function setMicrophoneTestActive(active: boolean) { microphoneTestActive = active; await engine?.setMicrophoneTestActive(active) }
 export function setVoiceInputVolume(...args: Parameters<Engine['setVoiceInputVolume']>) { engine?.setVoiceInputVolume(...args) }
 export function setVoiceParticipantMuted(...args: Parameters<Engine['setVoiceParticipantMuted']>) { engine?.setVoiceParticipantMuted(...args) }
+export function setVoiceParticipantVolume(...args: Parameters<Engine['setVoiceParticipantVolume']>) { engine?.setVoiceParticipantVolume(...args) }
 export function selectStream(...args: Parameters<Engine['selectStream']>) { engine?.selectStream(...args) }
 export function watchStream(...args: Parameters<Engine['watchStream']>) { engine?.watchStream(...args) }
 export function hideStream(...args: Parameters<Engine['hideStream']>) { engine?.hideStream(...args) }

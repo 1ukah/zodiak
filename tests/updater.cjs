@@ -4,9 +4,10 @@ const fs = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { build } = require('esbuild')
-const semver = require('semver')
+const updaterSemver = require('node:module').createRequire(require.resolve('electron-updater'))('semver')
+const { AppUpdater } = require('electron-updater/out/AppUpdater')
+const { GenericProvider } = require('electron-updater/out/providers/GenericProvider')
 const root = path.resolve(__dirname, '..')
-const tick = () => new Promise(resolve => setImmediate(resolve))
 const betaRelease = { tag_name: 'v1.2.0-beta', draft: false, prerelease: true, assets: [{ name: 'beta.yml' }] }
 
 async function main() {
@@ -16,24 +17,24 @@ async function main() {
       const result = await build({ entryPoints: [path.join(root, `src/main/${name}.ts`)], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['electron', 'electron-updater'] })
       return result.outputFiles[0].text
     }))
-    function harness({ packaged = true, prerelease = [], releases = [betaRelease], responseStatus = 200 } = {}) {
+    function harness({ packaged = true, version = '1.1.0', releases = [betaRelease], responseStatus = 200 } = {}) {
       const updater = new EventEmitter()
-      const checks = [], requests = [], messages = []
-      let downloads = 0, installed = false
-      let installArguments
+      const checks = [], requests = [], states = [], progress = []
+      let downloads = 0, installed = 0, installArguments
       let check = async () => updater.emit('update-not-available')
-      let message = async () => ({ response: 1 })
-      let download = async () => { updater.emit('update-downloaded', { version: '1.2.0-beta' }) }
+      let download = async () => updater.emit('update-downloaded', { version: '1.2.0-beta' })
       Object.assign(updater, {
-        currentVersion: { prerelease },
+        currentVersion: updaterSemver.parse(version), _logger: { info() {} },
+        isUpdateSupported: () => true, isUserWithinRollout: () => true,
+        isUpdateAvailable: AppUpdater.prototype.isUpdateAvailable, onUpdateAvailable: AppUpdater.prototype.onUpdateAvailable,
         setFeedURL(feed) { this.feed = feed },
         async checkForUpdates() { checks.push({ channel: this.channel, feed: this.feed, allowPrerelease: this.allowPrerelease, allowDowngrade: this.allowDowngrade }); return check() },
         async downloadUpdate() { downloads++; return download() },
-        quitAndInstall(...args) { installed = true; installArguments = args },
+        quitAndInstall(...args) { installed++; installArguments = args },
       })
       const electron = {
-        app: { isPackaged: packaged, getPath: () => profile, getVersion: () => '1.1.0' },
-        dialog: { showMessageBox: async options => { messages.push(options); return message(options) } },
+        app: { isPackaged: packaged, getPath: () => profile, getVersion: () => version },
+        dialog: { showMessageBox() { throw Error('Updater must never show native dialogs') } },
         net: { fetch: async (url, options) => {
           requests.push({ url, options })
           return { ok: responseStatus === 200, status: responseStatus, json: async () => typeof releases === 'function' ? releases(url) : releases }
@@ -45,8 +46,16 @@ async function main() {
         return module.exports
       }
       const api = load(bundles[0]), config = load(bundles[1])
-      api.initializeUpdater(() => null)
-      return { api, config, updater, checks, requests, messages, setCheck: fn => { check = fn }, setMessage: fn => { message = fn }, setDownload: fn => { download = fn }, get downloads() { return downloads }, get installed() { return installed }, get installArguments() { return installArguments } }
+      api.initializeUpdater(() => ({ isDestroyed: () => false, setProgressBar: value => progress.push(value), webContents: { send: (channel, state) => { assert.equal(channel, 'update:state:changed'); states.push(state) } } }))
+      return { api, config, updater, checks, requests, states, progress,
+        get state() { return api.getUpdateState() },
+        setCheck: fn => { check = fn }, setDownload: fn => { download = fn },
+        setCandidate: candidate => {
+          updater.getUpdateInfoAndProvider = async () => ({ info: { version: candidate }, provider: updater.feed })
+          check = () => AppUpdater.prototype.doCheckForUpdates.call(updater)
+        },
+        get downloads() { return downloads }, get installed() { return installed }, get installArguments() { return installArguments },
+      }
     }
     const validConfig = { url: 'ws://localhost:7880', apiKey: 'test', apiSecret: 'test' }
     let h = harness()
@@ -56,97 +65,137 @@ async function main() {
     await fs.writeFile(path.join(profile, 'config.json'), JSON.stringify({ ...validConfig, updateChannel: 'invalid' }))
     assert.equal((await h.config.loadConfig()).updateChannel, 'stable')
     await h.config.saveConfig({ ...validConfig, updateChannel: 'beta' })
-    assert.equal((await h.config.loadConfig()).updateChannel, 'beta')
     await h.api.checkForUpdatesOnStartup()
     assert.equal(h.checks[0].channel, 'beta')
-    assert.equal(h.messages.length, 0)
+    assert.equal(h.state.visible, false)
     assert.equal(h.updater.autoDownload, false)
     assert.equal(h.updater.autoInstallOnAppQuit, false)
     assert.equal(h.updater.disableDifferentialDownload, true)
-    console.log('PASS Config migration, validation, persistence and startup channel')
+    console.log('PASS Config migration, persistence, startup channel and explicit update consent')
 
     h = harness({ releases: [{ tag_name: 'v2.0.0', prerelease: false }, { ...betaRelease, draft: true }, { ...betaRelease, tag_name: 'v3.0.0-alpha.1' }, betaRelease] })
     await h.api.requestUpdateCheck(true, 'beta')
     assert.match(h.checks[0].feed.url, /\/v1\.2\.0-beta\/$/)
-    assert.equal(h.checks[0].feed.channel, 'beta')
     assert.equal(h.checks[0].allowPrerelease, true)
-    assert.equal(h.checks[0].allowDowngrade, false)
-    assert.equal(h.messages.length, 1)
+    assert.equal(h.checks[0].allowDowngrade, true)
+    assert.equal(h.state.phase, 'current')
+    assert.equal(h.state.visible, true)
     await h.api.requestUpdateCheck(true, 'stable')
     assert.equal(h.checks[1].feed.provider, 'github')
     assert.equal(h.checks[1].channel, 'latest')
     assert.equal(h.checks[1].allowPrerelease, false)
     assert.equal(h.checks[1].allowDowngrade, false)
     assert.equal((await h.config.loadConfig()).updateChannel, 'beta')
-    console.log('PASS Manual checks use unsaved selection; Beta excludes Stable, Alpha and drafts')
-
-    h = harness({ releases: [{ ...betaRelease, tag_name: 'v1.2.1-beta' }, betaRelease] })
-    await h.api.requestUpdateCheck(false, 'beta')
-    assert.match(h.checks[0].feed.url, /\/v1\.2\.1-beta\/$/)
-    assert.ok(semver.gt('1.2.1-beta', '1.2.0-beta'))
-    assert.ok(semver.gt('1.2.1', '1.2.1-beta'))
-    h = harness({ releases: [{ ...betaRelease, tag_name: 'v1.2.0-beta.1' }] })
-    await h.api.requestUpdateCheck(false, 'beta')
-    assert.match(h.checks[0].feed.url, /\/v1\.2\.0-beta\.1\/$/)
-    console.log('PASS Simple Beta tags, patch increments, Stable promotion and existing numbered Beta tags')
-
+    for (const tag of ['v1.2.1-beta', 'v1.2.0-beta.1']) {
+      h = harness({ releases: [{ ...betaRelease, tag_name: tag }, betaRelease] })
+      await h.api.requestUpdateCheck(false, 'beta')
+      assert.ok(h.checks[0].feed.url.endsWith(`/${tag}/`))
+    }
     h = harness({ releases: url => url.endsWith('page=1') ? Array(100).fill({ tag_name: 'v2.0.0', prerelease: false }) : [betaRelease] })
     await h.api.requestUpdateCheck(false, 'beta')
     assert.equal(h.requests.length, 2)
-    assert.match(h.checks[0].feed.url, /\/v1\.2\.0-beta\/$/)
     for (const options of [{ releases: [] }, { releases: [{ ...betaRelease, assets: [] }] }, { responseStatus: 403 }]) {
       h = harness(options)
       await h.api.requestUpdateCheck(true, 'beta')
       assert.equal(h.checks.length, 0)
-      assert.equal(h.messages[0].title, 'Update check failed')
-      assert.match(h.messages[0].detail, /No Beta release|missing its update manifest|HTTP 403/)
+      assert.equal(h.state.phase, 'error')
+      assert.equal(h.state.retry, 'check')
       await h.api.requestUpdateCheck(true, 'stable')
       assert.equal(h.checks.length, 1)
     }
-    console.log('PASS Pagination, unpublished Beta, missing manifest and API errors do not fall back to Stable')
+    console.log('PASS Stable/Beta feeds, tag formats, pagination and custom check errors')
 
-    h = harness({ prerelease: ['beta'] })
-    await h.api.requestUpdateCheck(false, 'stable')
-    assert.equal(h.checks[0].allowDowngrade, true)
-    await h.api.requestUpdateCheck(false, 'beta')
-    assert.equal(h.checks[1].allowDowngrade, false)
-    h = harness({ prerelease: ['alpha', 1] })
-    await h.api.requestUpdateCheck(false, 'stable')
-    assert.equal(h.checks[0].allowDowngrade, false)
-    console.log('PASS Downgrades allowed only when returning from a Beta build to Stable')
+    for (const [version, channel, candidate, available] of [
+      ['1.2.1', 'beta', '1.2.1-beta', true], ['1.2.1', 'beta', '1.2.0-beta', true],
+      ['1.2.1-beta', 'stable', '1.2.1', true], ['1.2.1-beta', 'stable', '1.2.0', true],
+      ['1.2.1', 'stable', '1.2.1', false], ['1.2.1-beta', 'beta', '1.2.1-beta', false],
+      ['1.2.1', 'stable', '1.2.0', false], ['1.2.1-beta', 'beta', '1.2.0-beta', false],
+      ['1.2.1-beta', 'beta', '1.2.2-beta', true],
+    ]) {
+      h = harness({ version })
+      h.setCandidate(candidate)
+      await h.api.requestUpdateCheck(true, channel)
+      assert.equal(h.state.phase, available ? 'available' : 'current', `${version} -> ${candidate}`)
+      assert.equal(h.downloads, 0)
+      await h.api.performUpdateAction('dismiss')
+      await h.api.requestUpdateCheck(true, channel)
+      assert.equal(h.state.phase, available ? 'available' : 'current')
+    }
+    console.log('PASS Actual updater semver/events and declined-update retries across channels')
 
-    h = harness()
-    let finishPrompt
-    h.setCheck(async () => h.updater.emit('update-available', { version: '1.2.0-beta' }))
-    h.setMessage(() => new Promise(resolve => { finishPrompt = resolve }))
+    h = harness({ version: '1.2.1' })
+    h.setCandidate('1.2.1-beta')
     await h.api.requestUpdateCheck(true, 'beta')
-    assert.equal(h.downloads, 0)
     await assert.rejects(h.api.requestUpdateCheck(true, 'stable'), /already being checked/)
-    assert.equal(h.checks.length, 1)
-    finishPrompt({ response: 1 }); await tick()
-    h.setCheck(async () => h.updater.emit('update-not-available'))
-    h.setMessage(async () => ({ response: 1 }))
-    await h.api.requestUpdateCheck(false, 'stable')
-    assert.equal(h.messages.length, 1)
     assert.equal(h.downloads, 0)
-    console.log('PASS Pending prompt locks its channel; declining downloads clears the lock and manual state')
-
-    h = harness()
-    h.setCheck(async () => h.updater.emit('update-available', { version: '1.2.0-beta' }))
-    h.setMessage(async options => ({ response: options.title === 'Update available' ? 0 : 1 }))
-    await h.api.requestUpdateCheck(true, 'beta'); await tick()
+    await h.api.performUpdateAction('download')
     assert.equal(h.downloads, 1)
-    assert.equal(h.installed, false)
+    assert.equal(h.state.phase, 'downloaded')
+    assert.equal(h.installed, 0)
+    assert.equal(h.updater.updateInfoAndProvider.provider.channel, 'beta')
+    const provider = new GenericProvider(h.updater.feed, h.updater, { platform: 'win32', executor: null })
+    let manifestUrl
+    provider.httpRequest = async url => { manifestUrl = url; return 'version: 1.2.1-beta\nfiles: []\n' }
+    assert.equal((await provider.getLatestVersion()).version, '1.2.1-beta')
+    assert.equal(manifestUrl.pathname.split('/').pop(), 'beta.yml')
+    await h.api.performUpdateAction('dismiss')
+    assert.equal(h.state.visible, false)
+    await h.api.requestUpdateCheck(true, 'beta')
+    assert.equal(h.state.visible, true)
+    assert.equal(h.state.phase, 'downloaded')
+    assert.equal(h.downloads, 1)
     await assert.rejects(h.api.requestUpdateCheck(true, 'stable'), /waiting to install/)
-    console.log('PASS Download needs consent; downloaded update stays tied to its channel and awaits restart consent')
+    await h.api.performUpdateAction('install')
+    assert.equal(h.installed, 1)
+    assert.deepEqual(h.installArguments, [true, true])
+    await assert.rejects(h.api.performUpdateAction('install'), /no longer available/)
+    console.log('PASS Download/install need explicit actions; Later reopens cached update without redownload')
 
     h = harness()
-    h.setCheck(async () => h.updater.emit('update-available', { version: '1.2.0-beta' }))
-    h.setMessage(async () => ({ response: 0 }))
-    await h.api.requestUpdateCheck(true, 'beta'); await tick()
-    assert.equal(h.installed, true)
-    assert.deepEqual(h.installArguments, [true, true])
-    console.log('PASS Restart and install explicitly requests silent installation and app relaunch')
+    h.setCandidate('1.2.0-beta')
+    await h.api.requestUpdateCheck(true, 'beta')
+    let finishDownload
+    h.setDownload(() => new Promise(resolve => { finishDownload = resolve }))
+    const downloading = h.api.performUpdateAction('download')
+    assert.equal(h.state.phase, 'downloading')
+    await assert.rejects(h.api.performUpdateAction('download'), /no longer available/)
+    await h.api.performUpdateAction('dismiss')
+    assert.equal(h.state.visible, true)
+    h.updater.emit('download-progress', { percent: 63, transferred: 126_000_000, total: 200_000_000, bytesPerSecond: 8_000_000 })
+    assert.equal(h.state.progress.percent, 63)
+    assert.equal(h.progress.at(-1), .63)
+    h.updater.emit('download-progress', { percent: 100, transferred: 200_000_000, total: 200_000_000, bytesPerSecond: 8_000_000 })
+    assert.equal(h.state.phase, 'downloading', '100% is not ready until validation finishes')
+    h.updater.emit('update-downloaded', { version: '1.2.0-beta' })
+    finishDownload(); await downloading
+    assert.equal(h.state.phase, 'downloaded')
+    assert.equal(h.progress.at(-1), -1)
+    assert.ok(h.states.every((state, index) => index === 0 || state.revision > h.states[index - 1].revision))
+    console.log('PASS Real download telemetry, taskbar, monotonic recovery state and duplicate-action protection')
+
+    h = harness()
+    h.setCandidate('1.2.0-beta')
+    await h.api.requestUpdateCheck(true, 'beta')
+    h.setDownload(async () => { throw Error('offline') })
+    await h.api.performUpdateAction('download')
+    assert.equal(h.state.phase, 'error')
+    assert.equal(h.state.retry, 'download')
+    h.setDownload(async () => h.updater.emit('update-downloaded', { version: '1.2.0-beta' }))
+    await h.api.performUpdateAction('retry')
+    assert.equal(h.state.phase, 'downloaded')
+    h.updater.quitAndInstall = () => h.updater.emit('error', Error('Cannot start installer'))
+    await h.api.performUpdateAction('install')
+    assert.equal(h.state.retry, 'install')
+    await h.api.performUpdateAction('dismiss')
+    assert.equal(h.state.visible, false)
+    await h.api.requestUpdateCheck(true, 'beta')
+    assert.equal(h.state.visible, true)
+    h.updater.quitAndInstall = () => { throw Error('Start failed') }
+    await h.api.performUpdateAction('retry')
+    assert.equal(h.state.phase, 'error')
+    assert.equal(h.state.retry, 'install')
+    await assert.rejects(h.api.performUpdateAction('arbitrary'), /Invalid update action/)
+    console.log('PASS Custom retry states for network/install-launch failures and input validation')
 
     h = harness()
     await h.config.saveConfig({ ...validConfig, updateChannel: 'beta', checkForUpdatesOnStartup: false })
@@ -155,8 +204,9 @@ async function main() {
     h = harness({ packaged: false })
     await h.api.checkForUpdatesOnStartup()
     await assert.rejects(h.api.requestUpdateCheck(true, 'beta'), /installed zodiak build/)
+    await assert.rejects(h.api.performUpdateAction('download'), /installed zodiak build/)
     assert.equal(h.requests.length, 0)
-    console.log('PASS Disabled startup checks and development builds skip network requests')
+    console.log('PASS Disabled startup checks and development builds skip network/install actions')
   } finally {
     assert.equal(path.dirname(profile), path.resolve(os.tmpdir()))
     assert.ok(path.basename(profile).startsWith('zodiak-updater-'))

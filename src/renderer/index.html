@@ -54,11 +54,12 @@
     <aside id="chat-panel" aria-label="Room chat" hidden>
       <header class="chat-header"><div id="chat-tabs" role="tablist" aria-label="Conversations"></div><button id="chat-hide" class="icon-button" type="button" title="Hide chat" aria-label="Hide chat"><span data-icon="close"></span></button></header>
       <div class="chat-history"><div id="chat-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div><button id="chat-jump" class="control-button" type="button" title="Jump to new messages" aria-label="Jump to new messages" hidden><span data-icon="down"></span><span class="chat-badge" hidden></span></button></div>
-      <form id="chat-form"><p id="chat-error" class="note" role="alert" hidden></p><div class="chat-composer"><textarea id="chat-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="chat-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div></form>
+      <form id="chat-form"><p id="chat-error" class="note" role="alert" hidden></p><div id="chat-attachment" aria-label="Images to send" hidden></div><input id="chat-file" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,image/avif" aria-label="Choose up to 10 images" hidden /><div class="chat-composer"><button id="chat-attach" class="icon-button" type="button" title="Attach image" aria-label="Attach image"><span data-icon="attach"></span></button><textarea id="chat-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="chat-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div></form>
     </aside>
     </div>
   </div>
   <div id="chat-bubbles" aria-label="Chat previews"></div>
+  <dialog id="chat-image-dialog" aria-label="Shared image" tabindex="-1"><button id="chat-image-previous" class="icon-button chat-image-nav" type="button" title="Previous image" aria-label="Previous image" hidden><span data-icon="previous"></span></button><img id="chat-image-full" alt="Shared image" /><button id="chat-image-next" class="icon-button chat-image-nav" type="button" title="Next image" aria-label="Next image" hidden><span data-icon="next"></span></button><div id="chat-image-sequence" role="group" aria-label="Images in this message" hidden></div><span id="chat-image-position" class="sr-only" role="status" aria-live="polite"></span></dialog>
   <dialog id="create-dialog" class="dialog small-dialog" aria-labelledby="create-title">
     <form id="create-form" class="dialog-content">
       <div class="panel-head"><h2 id="create-title">New room</h2><button class="icon-button" type="button" data-close="create-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
@@ -89,11 +90,13 @@
               <p id="audio-output-note" class="quality-note" role="status" hidden></p>
             </div>
             <div class="settings-section voice-settings">
-              <div class="audio-output-row"><label class="field" for="voice-input">Input<select id="voice-input"><option value="default">System default</option></select></label><button id="refresh-voice-input" class="control-button" type="button" title="Refresh microphones" aria-label="Refresh microphones"><span data-icon="refresh"></span></button></div>
+              <div class="audio-output-row"><label class="field" for="voice-input">Input<select id="voice-input"><option value="default">System default</option></select></label><button id="voice-loopback" class="control-button" type="button" title="Start microphone test" aria-label="Start microphone test" aria-pressed="false"><span data-icon="headphones"></span></button><button id="refresh-voice-input" class="control-button" type="button" title="Refresh microphones" aria-label="Refresh microphones"><span data-icon="refresh"></span></button></div>
               <label class="field audio-volume" for="voice-input-volume"><span class="volume-heading"><span>Input volume</span><output id="voice-input-volume-value" for="voice-input-volume">100%</output></span><input id="voice-input-volume" type="range" min="0" max="100" value="100" title="Microphone input volume" aria-label="Microphone input volume" /></label>
               <p id="voice-input-note" class="quality-note" role="status" hidden></p>
             </div>
             <label class="check" for="voice-enabled"><span>Voice chat</span><input id="voice-enabled" type="checkbox" role="switch" checked title="Send and receive voice in the current room" /></label>
+            <label class="check" for="voice-noise-suppression"><span>Noise supression</span><input id="voice-noise-suppression" type="checkbox" checked title="Reduce microphone background noise" /></label>
+            <label class="field audio-volume" id="suppression-strength-field" for="voice-suppression-strength"><span class="volume-heading"><span>Suppression strength</span><output id="voice-suppression-strength-value" for="voice-suppression-strength">80%</output></span><input id="voice-suppression-strength" type="range" min="0" max="100" value="80" title="Lower values preserve more voice and background sound; 100% applies full suppression" aria-label="Suppression strength" /></label>
           </section>
           <section id="settings-panel-interface" role="tabpanel" aria-labelledby="settings-tab-interface" tabindex="0" hidden>
             <label class="check" for="show-stream-statistics"><span>Stream statistics</span><input id="show-stream-statistics" type="checkbox" role="switch" title="Show host and viewer stream statistics" /></label>
@@ -136,6 +139,24 @@
         <p id="picker-note" class="note" role="alert" hidden></p><div class="actions"><button id="go-live" class="primary icon-action" type="submit" title="Start sharing" aria-label="Start sharing" disabled><span data-icon="share"></span></button></div>
       </div>
     </form>
+  </dialog>
+  <dialog id="update-dialog" class="dialog update-dialog" aria-labelledby="update-title" aria-describedby="update-version" tabindex="-1">
+    <div class="update-layout">
+      <div class="update-brand"><img src="/logo.svg" alt="zodiak" /></div>
+      <div class="update-content">
+        <button id="update-close" class="icon-button" type="button" title="Later" aria-label="Dismiss update"><span data-icon="close"></span></button>
+        <div class="update-heading"><h2 id="update-title" aria-live="polite">Update available</h2><p id="update-version"></p></div>
+        <div id="update-download" hidden>
+          <progress id="update-progress" max="100" aria-label="Update download"></progress>
+          <div class="update-metrics"><span id="update-percent"></span><span id="update-size"></span></div>
+        </div>
+        <p id="update-error" role="alert" hidden></p>
+        <div id="update-actions" class="update-actions">
+          <button id="update-later" class="ghost" type="button"><span data-icon="later"></span>Later</button>
+          <button id="update-primary" class="primary" type="button"></button>
+        </div>
+      </div>
+    </div>
   </dialog>
   <div id="remote-audio-rack" hidden></div><script type="module" src="/src/main.ts"></script>
 </body>

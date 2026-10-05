@@ -127,7 +127,7 @@ public partial class MainWindow : Window
         StatusText.Text = status;
     }
 
-    private static string GetDisplayVersion()
+    internal static string GetDisplayVersion()
     {
         var version = Assembly.GetExecutingAssembly()
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -135,7 +135,8 @@ public partial class MainWindow : Window
         return string.IsNullOrWhiteSpace(version) ? "" : version.Split('+')[0];
     }
 
-    internal static Task<int> RunUpdateAsync(bool forceRunAfter) => RunCoreInstallerAsync(string.Empty, false, true, forceRunAfter);
+    internal static Task<int> RunUpdateAsync(bool forceRunAfter, Action<string>? onStatus = null) =>
+        RunCoreInstallerAsync(string.Empty, false, true, forceRunAfter, onStatus);
 
     private static string BuildCoreInstallerArguments(string installPath, bool allUsers, bool isUpdate, bool forceRunAfter)
     {
@@ -150,9 +151,11 @@ public partial class MainWindow : Window
         return $"--{(allUsers ? "allusers" : "currentuser")} /S /D={Path.GetFullPath(installPath)}";
     }
 
-    private static async Task<int> RunCoreInstallerAsync(string installPath, bool allUsers, bool isUpdate, bool forceRunAfter = false)
+    private static async Task<int> RunCoreInstallerAsync(string installPath, bool allUsers, bool isUpdate, bool forceRunAfter = false, Action<string>? onStatus = null)
     {
+        onStatus?.Invoke("Preparing…");
         var payloadPath = await ExtractCoreInstallerAsync();
+        onStatus?.Invoke("Updating…");
         var arguments = BuildCoreInstallerArguments(installPath, allUsers, isUpdate, forceRunAfter);
         var startInfo = new ProcessStartInfo(payloadPath, arguments)
         {

@@ -1,6 +1,18 @@
 export type Role = 'publisher' | 'viewer'
 export type UpdateChannel = 'stable' | 'beta'
 
+export type UpdateAction = 'download' | 'install' | 'retry' | 'dismiss'
+export interface UpdateState {
+  revision: number
+  phase: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'current' | 'error'
+  visible: boolean
+  channel: UpdateChannel
+  version?: string
+  progress?: { percent: number; transferred: number; total: number; bytesPerSecond: number }
+  error?: string
+  retry?: 'check' | 'download' | 'install'
+}
+
 export interface AppConfig {
   url: string
   apiKey: string
@@ -13,6 +25,8 @@ export interface AppConfig {
   voiceEnabled: boolean
   voiceInputDeviceId: string
   voiceInputVolume: number
+  voiceNoiseSuppression: boolean
+  voiceSuppressionStrength: number
 }
 
 export interface RoomSummary {
@@ -26,6 +40,9 @@ export interface RoomParticipantInfo {
   id: string
   name: string
 }
+
+export interface ParticipantPreference { name: string; volume: number }
+export interface ParticipantPreferenceUpdate { id: string; name: string; volume?: number }
 
 export interface CreateRoomRequest {
   name: string
@@ -124,7 +141,12 @@ export const channels = {
   getConfig: 'config:get',
   saveConfig: 'config:save',
   checkForUpdates: 'update:check',
+  getUpdateState: 'update:state:get',
+  updateStateChanged: 'update:state:changed',
+  updateAction: 'update:action',
   createToken: 'token:create',
+  getParticipantPreferences: 'participants:preferences:get',
+  saveParticipantPreferences: 'participants:preferences:save',
   listRooms: 'rooms:list',
   listRoomParticipants: 'rooms:list-participants',
   createRoom: 'rooms:create',
@@ -146,7 +168,12 @@ export interface SharescreenApi {
   getConfig: () => Promise<AppConfig>
   saveConfig: (config: AppConfig) => Promise<ActionResult<AppConfig>>
   checkForUpdates: (channel?: UpdateChannel) => Promise<ActionResult<true>>
+  getUpdateState: () => Promise<UpdateState>
+  onUpdateStateChanged: (listener: (state: UpdateState) => void) => () => void
+  updateAction: (action: UpdateAction) => Promise<ActionResult<true>>
   createToken: (request: TokenRequest) => Promise<ActionResult<TokenResponse>>
+  getParticipantPreferences: (server: string) => Promise<ActionResult<Record<string, ParticipantPreference>>>
+  saveParticipantPreferences: (request: { server: string; participants: ParticipantPreferenceUpdate[] }) => Promise<ActionResult<true>>
   listRooms: () => Promise<ActionResult<RoomSummary[]>>
   listRoomParticipants: (request: RoomNameRequest) => Promise<ActionResult<RoomParticipantInfo[]>>
   createRoom: (request: CreateRoomRequest) => Promise<ActionResult<RoomSummary>>

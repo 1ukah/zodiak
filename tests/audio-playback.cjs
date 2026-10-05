@@ -1,6 +1,6 @@
 // Real WebRTC + production session audio in Electron; no server or microphone.
-const { app, BrowserWindow } = require('electron')
-const { build } = require('esbuild')
+const { app, BrowserWindow } = require('./silent-electron.cjs')
+const { build } = require('./build-renderer.cjs')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const os = require('node:os')
@@ -119,6 +119,8 @@ async function main() {
   await pause(1200)
   const baseline = await run(`audioProbe.rms('first')`)
   assert(baseline > 0.01, `Received audio must reach the processed output; RMS=${baseline}`)
+  assert.equal(win.webContents.isAudioMuted(), true, 'Sample measurements must run with device output muted')
+  assert.equal(await run(`audioSession.test.graph('first').receiverElement.muted && audioSession.test.graph('first').receiverElement.volume === 0`), true, 'Raw WebRTC receiver must not bypass the processed output')
   console.log('PASS Real remote WebRTC audio reaches the production playback output')
 
   for (const [stream, global, expected] of [[1, 1, 1], [.5, 1, .5], [.01, 1, .01], [1, .01, .01], [.5, .5, .25], [1, 2, 2], [0, 1, 0], [1, 0, 0]]) {
@@ -128,15 +130,16 @@ async function main() {
     console.log(`PASS Stream ${stream * 100}% x global ${global * 100}%: amplitude ratio ${ratio.toFixed(5)}`)
   }
   await pause(1000)
-  assert.equal(win.webContents.isCurrentlyAudible(), false, 'Zero gain must also silence actual playback, with no raw-track bypass')
-  console.log('PASS Zero volume silences actual playback')
+  assert.equal(await run(`audioProbe.rms('first')`), 0, 'Zero gain must silence the processed signal')
+  console.log('PASS Zero volume silences the processed signal')
 
   await run(`audioSession.setRemoteAudioVolume(1); audioSession.setStreamVolume(first.id, .5); audioSession.setStreamMuted(first.id, true)`)
   await pause(1000)
-  assert.equal(win.webContents.isCurrentlyAudible(), false, 'Mute silences actual playback')
+  assert.equal(await run(`audioProbe.rms('first')`), 0, 'Mute silences the processed signal')
+  assert.equal(await run(`audioSession.test.element('first').muted`), true)
   await run(`audioSession.setStreamMuted(first.id, false)`)
   await pause(400)
-  assert.equal(win.webContents.isCurrentlyAudible(), true, 'Unmute restores actual playback')
+  assert.equal(await run(`audioSession.test.element('first').muted`), false)
   assert(Math.abs(await run(`audioProbe.rms('first')`) / baseline - .5) < .06, 'Mute preserves the volume level')
   console.log('PASS Mute/unmute controls actual playback and preserves volume')
 
@@ -148,6 +151,15 @@ async function main() {
   await run(`audioSession.setRemoteAudioVolume(.5)`)
   assert(Math.abs(await run(`audioProbe.rms('second')`) / secondBaseline - .5) < .06, 'Global volume affects the second stream')
   console.log('PASS Independent stream levels and shared global volume')
+
+  await run(`audioSession.setMicrophoneTestActive(true); audioSession.setRemoteAudioVolume(1); audioSession.setStreamVolume(first.id,1)`)
+  assert.equal(await run(`audioProbe.rms('first')`),0)
+  assert.equal(await run(`audioProbe.rms('second')`),0)
+  await run(`audioSession.test.refresh()`)
+  assert.equal(await run(`audioProbe.rms('second')`),0,'Refresh must not bypass microphone-test muting')
+  await run(`audioSession.setMicrophoneTestActive(false)`)
+  assert(Math.abs(await run(`audioProbe.rms('second')`)/secondBaseline-1)<.12,'Stopping the test must restore the selected incoming level')
+  console.log('PASS Microphone testing silences all screen audio through volume changes and refresh, then restores it')
 
   await run(`(async () => { audioSession.setRemoteAudioVolume(0); window.oldOutput = audioSession.test.element('first').srcObject.getAudioTracks()[0]; window.oldContext = audioSession.test.context(); window.firstReplacement = await audioProbe.add('first', 880) })()`)
   assert.equal(await run(`oldOutput.readyState`), 'ended', 'Replacement stops the old processed output')
@@ -181,7 +193,7 @@ async function main() {
   assert.equal(await run(`document.querySelectorAll('audio').length`), 0)
   assert.equal(await run(`oldContext.state`), 'closed')
   await pause(1000)
-  assert.equal(win.webContents.isCurrentlyAudible(), false)
+  assert.equal(win.webContents.isAudioMuted(), true)
   console.log('PASS Session cleanup removes playback and closes its context')
   clearTimeout(timeout)
   win.destroy()
