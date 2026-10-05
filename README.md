@@ -18,7 +18,7 @@ Zodiak is a Windows app for screen sharing, text chat, and voice chat. Connect t
 ## Setup
 
 - [Run a LiveKit server](docs/livekit.md)
-- [Run from source and build the Windows installer](docs/run-from-source.md)
+- [Run from source](docs/run-from-source.md)
 
 ## Screenshot
 
