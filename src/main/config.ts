@@ -18,6 +18,8 @@ const DEFAULT_CONFIG: AppConfig = {
   voiceEnabled: true,
   voiceInputDeviceId: 'default',
   voiceInputVolume: 1,
+  voiceNoiseSuppression: true,
+  voiceSuppressionStrength: .8,
 }
 
 export interface ResolvedServer {
@@ -35,6 +37,10 @@ function stringOr(value: unknown, fallback: string): string {
 
 function inputVolume(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1
+}
+
+function suppressionStrength(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : .8
 }
 
 export function requireUpdateChannel(value: unknown): UpdateChannel {
@@ -108,6 +114,8 @@ export function validateConfig(value: unknown): AppConfig {
     voiceEnabled: value.voiceEnabled !== false,
     voiceInputDeviceId: stringOr(value.voiceInputDeviceId, 'default').slice(0, 512) || 'default',
     voiceInputVolume: inputVolume(value.voiceInputVolume),
+    voiceNoiseSuppression: value.voiceNoiseSuppression !== false,
+    voiceSuppressionStrength: suppressionStrength(value.voiceSuppressionStrength),
   }
 }
 
@@ -134,6 +142,8 @@ function normalizeStored(value: unknown): AppConfig {
     voiceEnabled: record.voiceEnabled !== false,
     voiceInputDeviceId: stringOr(record.voiceInputDeviceId, 'default').slice(0, 512) || 'default',
     voiceInputVolume: inputVolume(record.voiceInputVolume),
+    voiceNoiseSuppression: record.voiceNoiseSuppression !== false,
+    voiceSuppressionStrength: suppressionStrength(record.voiceSuppressionStrength),
   }
 }
 

@@ -26,6 +26,8 @@ export async function openSystemAudioTrack(excludeDiscord: boolean): Promise<Med
 export async function closeSystemAudio(): Promise<void> {
   unsubscribe?.(); unsubscribe = null; node?.disconnect(); node = null; track?.stop(); track = null
   const current = context; context = null
-  if (current && current.state !== 'closed') await current.close().catch(() => undefined)
-  if (window.sharescreen) await window.sharescreen.stopSystemAudio()
+  await Promise.all([
+    current && current.state !== 'closed' ? current.close().catch(() => undefined) : undefined,
+    window.sharescreen?.stopSystemAudio(),
+  ])
 }

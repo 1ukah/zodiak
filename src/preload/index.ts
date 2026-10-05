@@ -1,12 +1,21 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { channels, type SharescreenApi } from '../shared/types'
+import { channels, type SharescreenApi, type UpdateState } from '../shared/types'
 
 const api = {
   rendererReady: () => ipcRenderer.send(channels.rendererReady),
   getConfig: () => ipcRenderer.invoke(channels.getConfig),
   saveConfig: (config) => ipcRenderer.invoke(channels.saveConfig, config),
   checkForUpdates: (channel) => ipcRenderer.invoke(channels.checkForUpdates, channel),
+  getUpdateState: () => ipcRenderer.invoke(channels.getUpdateState),
+  updateAction: (action) => ipcRenderer.invoke(channels.updateAction, action),
+  onUpdateStateChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, state: UpdateState): void => listener(state)
+    ipcRenderer.on(channels.updateStateChanged, wrapped)
+    return () => ipcRenderer.removeListener(channels.updateStateChanged, wrapped)
+  },
   createToken: (request) => ipcRenderer.invoke(channels.createToken, request),
+  getParticipantPreferences: (server) => ipcRenderer.invoke(channels.getParticipantPreferences, server),
+  saveParticipantPreferences: (request) => ipcRenderer.invoke(channels.saveParticipantPreferences, request),
   listRooms: () => ipcRenderer.invoke(channels.listRooms),
   listRoomParticipants: (request) => ipcRenderer.invoke(channels.listRoomParticipants, request),
   createRoom: (request) => ipcRenderer.invoke(channels.createRoom, request),

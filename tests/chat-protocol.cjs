@@ -4,7 +4,7 @@ const Module = require('node:module')
 const path = require('node:path')
 const code = buildSync({ entryPoints:[path.join(__dirname,'../src/shared/chat.ts')], bundle:true, platform:'node', format:'cjs', write:false }).outputFiles[0].text
 const compiled = new Module('chat-protocol'); compiled._compile(code, 'chat-protocol.cjs')
-const { parseChatPacket, CHAT_MAX_LENGTH, CHAT_MAX_BYTES } = compiled.exports
+const { parseChatPacket, parseChatImagePacket, validateChatImage, CHAT_IMAGE_MAX_BYTES, CHAT_MAX_LENGTH, CHAT_MAX_BYTES } = compiled.exports
 const encode = value => new TextEncoder().encode(JSON.stringify(value))
 const message = { version:1, id:'message-1', timestamp:Date.now(), text:'Olá 😀', recipient:'bob' }
 assert.deepEqual(parseChatPacket(encode(message)),message)
@@ -15,3 +15,26 @@ assert.equal(parseChatPacket(new TextEncoder().encode('{broken')),null)
 assert.equal(parseChatPacket(encode({...message,text:'😀'.repeat(1000)})).text.length,2000)
 assert.deepEqual(parseChatPacket(encode({...message,senderId:'spoof',senderName:'spoof',local:true})),message)
 console.log('PASS Packet validation rejects malformed, oversize, and invalid UTF-8 messages; ignores forged sender fields')
+const imageMessage = { ...message, text: '', images: [{ name: 'photo.png', mimeType: 'image/png', size: 100 }] }
+assert.deepEqual(parseChatImagePacket(encode(imageMessage)), imageMessage)
+assert.equal(parseChatPacket(encode(imageMessage)), null)
+assert.deepEqual(parseChatImagePacket(encode({ ...imageMessage, senderId: 'spoof', images: [{ ...imageMessage.images[0], blob: 'spoof' }] })), imageMessage)
+for (const image of [null, {}, { ...imageMessage.images[0], name: '' }, { ...imageMessage.images[0], name: 'x'.repeat(257) }, { ...imageMessage.images[0], mimeType: 'image/svg+xml' }, { ...imageMessage.images[0], mimeType: 'text/plain' }, { ...imageMessage.images[0], size: 0 }, { ...imageMessage.images[0], size: -1 }, { ...imageMessage.images[0], size: 1.5 }, { ...imageMessage.images[0], size: CHAT_IMAGE_MAX_BYTES + 1 }]) assert.equal(parseChatImagePacket(encode({ ...imageMessage, images: [image] })), null)
+const tenImages = { ...imageMessage, images: Array.from({length:10}, () => ({...imageMessage.images[0], size: CHAT_IMAGE_MAX_BYTES})) }
+assert.equal(parseChatImagePacket(encode(tenImages)).images.length, 10)
+for (const images of [[], null, {}, [...tenImages.images, tenImages.images[0]]]) assert.equal(parseChatImagePacket(encode({...imageMessage, images})), null)
+assert.deepEqual(parseChatImagePacket(encode({...message, text:'', image:imageMessage.images[0]})), imageMessage)
+;(async () => {
+  await validateChatImage(new Blob([new Uint8Array([137,80,78,71,13,10,26,10])], {type:'image/png'}))
+  const maximum = new Uint8Array(CHAT_IMAGE_MAX_BYTES); maximum.set([137,80,78,71,13,10,26,10])
+  await validateChatImage(new Blob([maximum], {type:'image/png'}))
+  await validateChatImage(new Blob([new Uint8Array([255,216,255])], {type:'image/jpeg'}))
+  await validateChatImage(new Blob(['GIF89a'], {type:'image/gif'}))
+  await validateChatImage(new Blob(['RIFFxxxxWEBP'], {type:'image/webp'}))
+  await validateChatImage(new Blob(['xxxxftypavif'], {type:'image/avif'}))
+  await assert.rejects(validateChatImage(new Blob(['<svg/>'], {type:'image/svg+xml'})), /Choose/)
+  await assert.rejects(validateChatImage(new Blob(['not a png'], {type:'image/png'})), /valid/)
+  await assert.rejects(validateChatImage(new Blob([], {type:'image/png'})), /10 MB/)
+  await assert.rejects(validateChatImage(new Blob([new Uint8Array(CHAT_IMAGE_MAX_BYTES + 1)], {type:'image/png'})), /10 MB/)
+  console.log('PASS Image metadata and file contents enforce supported image formats and the 10 MB limit')
+})().catch(error => { console.error(error); process.exitCode = 1 })

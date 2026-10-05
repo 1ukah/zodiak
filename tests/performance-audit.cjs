@@ -1,6 +1,6 @@
 // Profiles the real production entry point with an isolated offline profile.
 // Run after npm run build: npx electron tests/performance-audit.cjs
-const { app, desktopCapturer, nativeImage } = require('electron')
+const { app, desktopCapturer, nativeImage } = require('./silent-electron.cjs')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const os = require('node:os')

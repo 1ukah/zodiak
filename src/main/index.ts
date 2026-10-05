@@ -7,6 +7,8 @@ import { startSystemAudio, stopSystemAudio } from './system-audio'
 import { loadConfig, saveConfig } from './config'
 import { isRecord } from './parse'
 import { settle } from './result'
+import { getLocalIdentity } from './identity'
+import { flushParticipantPreferences, getParticipantPreferences, saveParticipantPreferences } from './participant-preferences'
 
 // Electron enables Chromium's GPU pipeline by default. This app deliberately
 // never calls disableHardwareAcceleration; the renderer also reports Chromium's
@@ -285,13 +287,29 @@ function captureAccelerationStatus(): CaptureAccelerationStatus {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(channels.getConfig, () => loadConfig())
-  ipcMain.handle(channels.saveConfig, (_event, payload: unknown) => settle(() => saveConfig(payload)))
+  ipcMain.handle(channels.getConfig, async () => { await getLocalIdentity(); return loadConfig() })
+  ipcMain.handle(channels.getParticipantPreferences, (_event, server: unknown) => settle(() => getParticipantPreferences(server)))
+  ipcMain.handle(channels.saveParticipantPreferences, (_event, payload: unknown) => settle(async () => { await saveParticipantPreferences(payload); return true as const }))
+  ipcMain.handle(channels.saveConfig, (_event, payload: unknown) => settle(async () => {
+    const previous = await loadConfig()
+    const saved = await saveConfig(payload)
+    if (app.isPackaged && saved.updateChannel !== previous.updateChannel) {
+      // Saving stays independent of network failures or a pending update prompt.
+      void loadUpdater().then(updater => updater.requestUpdateCheck(true, saved.updateChannel))
+        .catch(error => console.warn('Could not check the selected update channel:', error))
+    }
+    return saved
+  }))
   ipcMain.handle(channels.checkForUpdates, (_event, channel: unknown) => settle(async () => {
     await (await loadUpdater()).requestUpdateCheck(true, channel)
     return true as const
   }))
   ipcMain.handle(channels.createToken, (_event, payload: unknown) => settle(async () => (await import('./tokens')).createParticipantToken(payload)))
+  ipcMain.handle(channels.getUpdateState, async () => (await loadUpdater()).getUpdateState())
+  ipcMain.handle(channels.updateAction, (_event, action: unknown) => settle(async () => {
+    await (await loadUpdater()).performUpdateAction(action)
+    return true as const
+  }))
   ipcMain.handle(channels.listRooms, () => settle(async () => (await import('./rooms')).listLiveRooms()))
   ipcMain.handle(channels.listRoomParticipants, (_event, payload: unknown) => settle(async () => (await import('./rooms')).listLiveRoomParticipants(payload)))
   ipcMain.handle(channels.createRoom, (_event, payload: unknown) => settle(async () => (await import('./rooms')).createLiveRoom(payload)))
@@ -374,4 +392,11 @@ app.on('window-all-closed', () => {
   setSleepBlock(false)
   stopSystemAudio()
   app.quit()
+})
+
+let preferencesFlushed = false
+app.on('before-quit', event => {
+  if (preferencesFlushed) return
+  event.preventDefault()
+  void flushParticipantPreferences().finally(() => { preferencesFlushed = true; app.quit() })
 })

@@ -1,9 +1,9 @@
-import { randomBytes } from 'node:crypto'
 import { AccessToken, TrackSource } from 'livekit-server-sdk'
 import type { TokenRequest, TokenResponse } from '../shared/types'
 import { requireDisplayName, requireRoom } from './config'
 import { connectServer, explainLiveKitError } from './livekit'
 import { isRecord } from './parse'
+import { getLocalIdentity } from './identity'
 
 export function parseTokenRequest(value: unknown): TokenRequest {
   if (!isRecord(value)) throw new Error('Invalid token request')
@@ -20,7 +20,7 @@ export async function createParticipantToken(value: unknown): Promise<TokenRespo
   const request = parseTokenRequest(value)
   const server = await connectServer()
   try {
-    const identity = identityFor(request.displayName)
+    const identity = await getLocalIdentity()
     const token = new AccessToken(server.apiKey, server.apiSecret, {
       identity,
       name: request.displayName,
@@ -49,15 +49,4 @@ export async function createParticipantToken(value: unknown): Promise<TokenRespo
   } catch (error) {
     throw explainLiveKitError(error, server.signalUrl)
   }
-}
-
-
-function identityFor(name: string): string {
-  const slug = name
-    .normalize('NFKD')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 24)
-  return `${slug || 'user'}-${randomBytes(3).toString('hex')}`
 }
