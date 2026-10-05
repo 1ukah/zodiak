@@ -20,6 +20,11 @@ const DEFAULT_CONFIG: AppConfig = {
   voiceInputVolume: 1,
   voiceNoiseSuppression: true,
   voiceSuppressionStrength: .8,
+  voiceEchoCancellation: true,
+  voiceAutoGainControl: false,
+  voiceNoiseGate: true,
+  voiceAutoInputSensitivity: true,
+  voiceInputSensitivity: -50,
 }
 
 export interface ResolvedServer {
@@ -41,6 +46,10 @@ function inputVolume(value: unknown): number {
 
 function suppressionStrength(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : .8
+}
+
+function inputSensitivity(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(-100, Math.min(0, value)) : -50
 }
 
 export function requireUpdateChannel(value: unknown): UpdateChannel {
@@ -116,6 +125,11 @@ export function validateConfig(value: unknown): AppConfig {
     voiceInputVolume: inputVolume(value.voiceInputVolume),
     voiceNoiseSuppression: value.voiceNoiseSuppression !== false,
     voiceSuppressionStrength: suppressionStrength(value.voiceSuppressionStrength),
+    voiceEchoCancellation: value.voiceEchoCancellation !== false,
+    voiceAutoGainControl: value.voiceAutoGainControl === true,
+    voiceNoiseGate: value.voiceNoiseGate !== false,
+    voiceAutoInputSensitivity: value.voiceAutoInputSensitivity !== false,
+    voiceInputSensitivity: inputSensitivity(value.voiceInputSensitivity),
   }
 }
 
@@ -144,6 +158,11 @@ function normalizeStored(value: unknown): AppConfig {
     voiceInputVolume: inputVolume(record.voiceInputVolume),
     voiceNoiseSuppression: record.voiceNoiseSuppression !== false,
     voiceSuppressionStrength: suppressionStrength(record.voiceSuppressionStrength),
+    voiceEchoCancellation: record.voiceEchoCancellation !== false,
+    voiceAutoGainControl: record.voiceAutoGainControl === true,
+    voiceNoiseGate: record.voiceNoiseGate !== false,
+    voiceAutoInputSensitivity: record.voiceAutoInputSensitivity !== false,
+    voiceInputSensitivity: inputSensitivity(record.voiceInputSensitivity),
   }
 }
 

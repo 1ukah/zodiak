@@ -122,7 +122,10 @@ function createWindow(splash: BrowserWindow | null = null): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: true,
+      // Microphone AudioWorklets and WebRTC must keep their scheduling when
+      // covered, unfocused, or minimized. Native visibility events below still
+      // pause the video UI and background roster/telemetry work explicitly.
+      backgroundThrottling: false,
     },
   })
 

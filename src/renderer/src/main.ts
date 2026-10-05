@@ -91,6 +91,14 @@ const voiceEnabledInput = byId('voice-enabled', HTMLInputElement)
 const noiseSuppressionInput = byId('voice-noise-suppression', HTMLInputElement)
 const suppressionStrengthInput = byId('voice-suppression-strength', HTMLInputElement)
 const suppressionStrengthValue = byId('voice-suppression-strength-value', HTMLOutputElement)
+const echoCancellationInput = byId('voice-echo-cancellation', HTMLInputElement)
+const autoGainControlInput = byId('voice-auto-gain-control', HTMLInputElement)
+const noiseGateInput = byId('voice-noise-gate', HTMLInputElement)
+const autoSensitivityInput = byId('voice-auto-sensitivity', HTMLInputElement)
+const sensitivityInput = byId('voice-input-sensitivity', HTMLInputElement)
+const sensitivityValue = byId('voice-input-sensitivity-value', HTMLOutputElement)
+const sensitivityMeter = byId('voice-input-level', HTMLElement)
+const sensitivityStatus = byId('voice-gate-status', HTMLOutputElement)
 const voiceInput = byId('voice-input', HTMLSelectElement)
 const voiceInputNote = byId('voice-input-note', HTMLParagraphElement)
 const refreshVoiceInputButton = byId('refresh-voice-input', HTMLButtonElement)
@@ -151,7 +159,7 @@ let roomPendingDeletion: string | null = null
 const chat = new RoomChat(sendChatMessage, makeAvatar, () => renderMembers())
 
 const hooks: SessionHooks = {
-  onVoice: (state) => { voiceState = state; syncVoiceUI() },
+  onVoice: (state) => { voiceState = state; syncVoiceUI(); if (!loopbackRequested) showInputLevel(state.inputLevel) },
   onRoomLost: () => chat.clearHistory(),
   onChatMessage: (message) => chat.receive(message),
   onConnection: (state) => {
@@ -287,7 +295,7 @@ function bind(): void {
       const saved = await persistConfig()
       if (!saved) return
       if (currentRoom) {
-        try { await configureVoice({ enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength }) }
+        try { await configureVoice({ enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength, echoCancellation: saved.voiceEchoCancellation, autoGainControl: saved.voiceAutoGainControl, noiseGate: saved.voiceNoiseGate, autoInputSensitivity: saved.voiceAutoInputSensitivity, inputSensitivity: saved.voiceInputSensitivity }) }
         catch (error) { showNote(settingsNote, `Settings saved. ${messageOf(error)}`, 'error'); return }
       }
       if (currentRoom && saved.displayName !== previousName) {
@@ -384,6 +392,10 @@ function bind(): void {
   voiceEnabledInput.addEventListener('change', () => { syncVoiceSettings(); void previewVoiceSettings() })
   noiseSuppressionInput.addEventListener('change', () => { syncVoiceSettings(); void updateMicrophoneTest(); void previewVoiceSettings() })
   suppressionStrengthInput.addEventListener('input', () => { syncSuppressionStrength(); void updateMicrophoneTest(); void previewVoiceSettings() })
+  for (const control of [echoCancellationInput, autoGainControlInput, noiseGateInput, autoSensitivityInput]) {
+    control.addEventListener('change', () => { syncVoiceSettings(); void updateMicrophoneTest(); void previewVoiceSettings() })
+  }
+  sensitivityInput.addEventListener('input', () => { syncSensitivity(); void updateMicrophoneTest(); void previewVoiceSettings() })
   for (const id of ['voice-mute', 'voice-focus-mute']) elementById(id).addEventListener('click', () => void changeVoice(() => setVoiceMuted(!voiceState.muted)))
   for (const id of ['voice-deafen', 'voice-focus-deafen']) elementById(id).addEventListener('click', () => void changeVoice(() => setVoiceDeafened(!voiceState.deafened)))
   navigator.mediaDevices?.addEventListener?.('devicechange', () => { void loadAudioOutputs(); void loadVoiceInputs() })
@@ -578,7 +590,7 @@ async function connect(roomName: string, role: Role): Promise<boolean> {
       url: issued.value.url,
       token: issued.value.token,
       subscribe: false,
-      voice: { enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength, participantVolumes: Object.fromEntries([...participantPreferences].map(([id, preference]) => [id, preference.volume])) },
+      voice: { enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength, echoCancellation: saved.voiceEchoCancellation, autoGainControl: saved.voiceAutoGainControl, noiseGate: saved.voiceNoiseGate, autoInputSensitivity: saved.voiceAutoInputSensitivity, inputSensitivity: saved.voiceInputSensitivity, participantVolumes: Object.fromEntries([...participantPreferences].map(([id, preference]) => [id, preference.volume])) },
       media: { video, audioRack },
       hooks: {
         ...hooks,
@@ -1111,11 +1123,12 @@ function syncVoiceUI(): void {
   const available = Boolean(currentRoom) && connection === 'connected' && voiceState.enabled
   for (const id of ['voice-mute', 'voice-focus-mute']) {
     const button = byId(id, HTMLButtonElement)
-    button.disabled = !available || voiceState.busy || voiceState.deafened || loopbackRequested
+    button.disabled = !available || voiceState.busy || loopbackRequested
+    button.classList.toggle('is-deafened', voiceState.deafened)
     button.classList.toggle('is-muted', voiceState.muted)
     setButtonIcon(button, voiceState.muted ? 'mic-off' : 'mic')
     button.setAttribute('aria-pressed', String(voiceState.muted))
-    labelButton(button, !voiceState.enabled ? 'Voice chat disabled in settings' : voiceState.deafened ? 'Microphone muted while deafened' : voiceState.muted ? 'Unmute microphone' : 'Mute microphone')
+    labelButton(button, !voiceState.enabled ? 'Voice chat disabled in settings' : voiceState.deafened ? 'Unmute microphone and undeafen' : voiceState.muted ? 'Unmute microphone' : 'Mute microphone')
   }
   for (const id of ['voice-deafen', 'voice-focus-deafen']) {
     const button = byId(id, HTMLButtonElement)
@@ -1187,7 +1200,28 @@ async function changeVoice(action: () => Promise<void>): Promise<void> {
   catch (error) { showNote(stageNote, messageOf(error), 'error') }
 }
 
+function voiceProcessingSettings() {
+  return { echoCancellation: echoCancellationInput.checked, autoGainControl: autoGainControlInput.checked,
+    noiseGate: noiseGateInput.checked, autoInputSensitivity: autoSensitivityInput.checked, inputSensitivity: Number(sensitivityInput.value) }
+}
+
+function syncSensitivity(): void {
+  sensitivityValue.value = autoSensitivityInput.checked ? 'Automatic' : `${sensitivityInput.value} dB`
+  sensitivityInput.parentElement!.style.setProperty('--threshold', String((100 + Number(sensitivityInput.value)) / 100))
+  sensitivityInput.parentElement!.classList.toggle('automatic', autoSensitivityInput.checked)
+}
+
+function showInputLevel(level?: import('./noise-gate').InputLevel): void {
+  sensitivityMeter.style.setProperty('--level', String(Math.max(0, Math.min(1, (100 + (level?.db ?? -100)) / 100))))
+  if (level && autoSensitivityInput.checked) sensitivityInput.parentElement!.style.setProperty('--threshold', String((100 + level.threshold) / 100))
+  sensitivityStatus.value = level ? `${level.db} dB · ${level.open ? 'Passing audio' : 'Gate closed'}` : 'Test your microphone to see the input level'
+}
+
 function syncVoiceSettings(): void {
+  for (const control of [echoCancellationInput, autoGainControlInput, noiseGateInput]) control.disabled = !voiceEnabledInput.checked
+  autoSensitivityInput.disabled = !voiceEnabledInput.checked || !noiseGateInput.checked
+  sensitivityInput.disabled = !voiceEnabledInput.checked || !noiseGateInput.checked || autoSensitivityInput.checked
+  syncSensitivity()
   suppressionStrengthInput.disabled = !voiceEnabledInput.checked || !noiseSuppressionInput.checked
   noiseSuppressionInput.disabled = !voiceEnabledInput.checked
   voiceInputVolume.disabled = !voiceEnabledInput.checked
@@ -1205,7 +1239,7 @@ function loopbackSettings(): LoopbackSettings {
   return {
     inputDeviceId: voiceInput.value || 'default', inputVolume: Number(voiceInputVolume.value) / 100,
     noiseSuppression: noiseSuppressionInput.checked, outputDeviceId: selectedAudioOutput,
-    suppressionStrength: Number(suppressionStrengthInput.value) / 100,
+    suppressionStrength: Number(suppressionStrengthInput.value) / 100, ...voiceProcessingSettings(),
     outputVolume: Number(audioVolumeInput.value) / 100,
   }
 }
@@ -1222,6 +1256,7 @@ function stopMicrophoneTest(): void {
   microphoneLoopback?.stop()
   syncMicrophoneTestButton()
   syncVoiceUI()
+  showInputLevel()
   if (wasRequested) void setMicrophoneTestActive(false).catch(error => showNote(stageNote, `Could not restore room voice: ${messageOf(error)}`, 'error'))
 }
 
@@ -1238,7 +1273,7 @@ async function toggleMicrophoneTest(): Promise<void> {
     if (request !== loopbackRequest) return
     const { MicrophoneLoopback } = await import('./microphone-loopback')
     if (request !== loopbackRequest || !settingsDialog.open || !voiceEnabledInput.checked) return
-    microphoneLoopback ??= new MicrophoneLoopback()
+    microphoneLoopback ??= new MicrophoneLoopback(showInputLevel)
     await microphoneLoopback.start(loopbackSettings())
   } catch (error) {
     if (request !== loopbackRequest) return
@@ -1261,7 +1296,7 @@ async function updateMicrophoneTest(): Promise<void> {
 async function previewVoiceSettings(): Promise<void> {
   if (!currentRoom) return
   try {
-    await configureVoice({ enabled: voiceEnabledInput.checked, inputDeviceId: savedConfig?.voiceInputDeviceId || 'default', noiseSuppression: noiseSuppressionInput.checked, suppressionStrength: Number(suppressionStrengthInput.value) / 100 })
+    await configureVoice({ enabled: voiceEnabledInput.checked, inputDeviceId: savedConfig?.voiceInputDeviceId || 'default', noiseSuppression: noiseSuppressionInput.checked, suppressionStrength: Number(suppressionStrengthInput.value) / 100, ...voiceProcessingSettings() })
   } catch (error) { showNote(settingsNote, messageOf(error), 'error') }
 }
 
@@ -1475,7 +1510,7 @@ async function persistConfig(): Promise<AppConfig | null> {
     fillForm(saved.value); return saved.value
   } catch (error) { openServerSettings(); showNote(serverNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: updateChannelInput.value === 'beta' ? 'beta' : 'stable', showChatBubbles: showChatBubblesInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100 } }
+function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: updateChannelInput.value === 'beta' ? 'beta' : 'stable', showChatBubbles: showChatBubblesInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100, voiceEchoCancellation: echoCancellationInput.checked, voiceAutoGainControl: autoGainControlInput.checked, voiceNoiseGate: noiseGateInput.checked, voiceAutoInputSensitivity: autoSensitivityInput.checked, voiceInputSensitivity: Number(sensitivityInput.value) } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
   urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
@@ -1486,6 +1521,12 @@ function fillForm(config: AppConfig): void {
   showStreamStatisticsInput.checked = showStatistics
   showChatBubblesInput.checked = config.showChatBubbles === true
   voiceEnabledInput.checked = config.voiceEnabled !== false
+  echoCancellationInput.checked = config.voiceEchoCancellation !== false
+  autoGainControlInput.checked = config.voiceAutoGainControl === true
+  noiseGateInput.checked = config.voiceNoiseGate !== false
+  autoSensitivityInput.checked = config.voiceAutoInputSensitivity !== false
+  sensitivityInput.value = String(config.voiceInputSensitivity ?? -50)
+  showInputLevel()
   noiseSuppressionInput.checked = config.voiceNoiseSuppression !== false
   suppressionStrengthInput.value = String(Math.round((config.voiceSuppressionStrength ?? .8) * 100))
   syncSuppressionStrength()

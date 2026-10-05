@@ -1,11 +1,14 @@
 import { Track } from 'livekit-client'
 import { MicrophoneProcessor } from './microphone-processor'
+import type { NoiseGateSettings, InputLevel } from './noise-gate'
 
-export interface LoopbackSettings {
+export interface LoopbackSettings extends NoiseGateSettings {
   inputDeviceId: string
   inputVolume: number
   noiseSuppression: boolean
   suppressionStrength?: number
+  echoCancellation?: boolean
+  autoGainControl?: boolean
   outputDeviceId: string
   outputVolume: number
 }
@@ -30,6 +33,8 @@ export class MicrophoneLoopback {
   private startup?: Promise<void>
   active = false
 
+  constructor(private onLevel?: (level: InputLevel) => void) {}
+
   async start(settings: LoopbackSettings): Promise<void> {
     this.stop()
     this.settings = { ...settings }
@@ -49,14 +54,15 @@ export class MicrophoneLoopback {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: {
       deviceId: this.settings!.inputDeviceId === 'default' ? undefined : { exact: this.settings!.inputDeviceId },
       // Match room capture: RNNoise is the only noise suppressor.
-      echoCancellation: true, noiseSuppression: false, autoGainControl: true,
+      channelCount: 1, sampleRate: 48000, echoCancellation: this.settings!.echoCancellation !== false,
+      noiseSuppression: false, autoGainControl: this.settings!.autoGainControl === true,
     } })
     if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return }
     let context: AudioContext
-    try { context = new AudioContext({ sampleRate: 48000 }) }
+    try { context = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' }) }
     catch (error) { stream.getTracks().forEach(track => track.stop()); throw error }
     const state: LoopbackResources = {
-      stream, context, processor: new MicrophoneProcessor(context, this.settings!.inputVolume, this.settings!.suppressionStrength ?? .8),
+      stream, context, processor: new MicrophoneProcessor(context, this.settings!.inputVolume, this.settings!.suppressionStrength ?? .8, this.settings!, this.onLevel),
     }
     this.current = state
     await state.processor.init({ kind: Track.Kind.Audio, track: stream.getAudioTracks()[0], audioContext: context })
@@ -77,10 +83,11 @@ export class MicrophoneLoopback {
   }
 
   async configure(settings: LoopbackSettings): Promise<void> {
-    const previousDevice = this.settings?.inputDeviceId
+    const previous = this.settings
     this.settings = { ...settings }
     if (!this.active) return
-    if (settings.inputDeviceId !== previousDevice) { await this.start(settings); return }
+    if (settings.inputDeviceId !== previous?.inputDeviceId || settings.echoCancellation !== previous?.echoCancellation || settings.autoGainControl !== previous?.autoGainControl) { await this.start(settings); return }
+    this.current?.processor.setNoiseGate(settings)
     this.current?.processor.setVolume(settings.inputVolume)
     this.current?.processor.setSuppressionStrength(settings.suppressionStrength ?? .8)
     if (!settings.noiseSuppression) this.current?.processor.disableNoiseSuppression()
@@ -91,6 +98,7 @@ export class MicrophoneLoopback {
   }
 
   private async apply(state: LoopbackResources): Promise<void> {
+    state.processor.setNoiseGate(this.settings!)
     state.processor.setVolume(this.settings!.inputVolume)
     state.processor.setSuppressionStrength(this.settings!.suppressionStrength ?? .8)
     await state.processor.setNoiseSuppression(this.settings!.noiseSuppression)

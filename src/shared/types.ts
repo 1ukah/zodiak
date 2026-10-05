@@ -27,6 +27,11 @@ export interface AppConfig {
   voiceInputVolume: number
   voiceNoiseSuppression: boolean
   voiceSuppressionStrength: number
+  voiceEchoCancellation: boolean
+  voiceAutoGainControl: boolean
+  voiceNoiseGate: boolean
+  voiceAutoInputSensitivity: boolean
+  voiceInputSensitivity: number
 }
 
 export interface RoomSummary {
