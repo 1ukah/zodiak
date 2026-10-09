@@ -4,6 +4,7 @@ import { channels, type SharescreenApi, type UpdateState } from '../shared/types
 const api = {
   rendererReady: () => ipcRenderer.send(channels.rendererReady),
   getConfig: () => ipcRenderer.invoke(channels.getConfig),
+  getPlatformCapabilities: () => ipcRenderer.invoke(channels.getPlatformCapabilities),
   saveConfig: (config) => ipcRenderer.invoke(channels.saveConfig, config),
   checkForUpdates: (channel) => ipcRenderer.invoke(channels.checkForUpdates, channel),
   getUpdateState: () => ipcRenderer.invoke(channels.getUpdateState),

@@ -1,4 +1,4 @@
-name: Build and release Windows installer
+name: Build and release desktop packages
 
 on:
   push:
@@ -61,3 +61,28 @@ jobs:
         # The custom publisher derives its version from VERSION after the tag
         # check above; it does not accept electron-builder CLI configuration.
         run: npm run release
+
+  linux:
+    name: Build Linux packages
+    needs: release
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out the validated tag
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Check types and capture behavior
+        run: npm run typecheck && node tests/linux-capture.cjs
+      - name: Build Linux packages
+        run: npm run pack:linux
+      - name: Build Arch installer package
+        run: npx electron-builder --linux pacman --prepackaged dist/linux-unpacked --publish never
+      - name: Upload packages to the existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/*-linux-x86_64.AppImage dist/*-linux-x64.tar.gz dist/*-linux-x64.pacman --clobber

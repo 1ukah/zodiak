@@ -1866,6 +1866,8 @@ extra participants scroll naturally. */
 .volume-heading .icon { width: 16px; height: 16px; }
 .volume-heading output { float: none; }
 .picker-card { width: 680px; }
+.picker-card.portal-picker { width: 540px; }
+.portal-picker #sources[hidden] { display: none; }
 .picker-card .panel-head h2 { font-size: 16px; }
 .picker-foot { gap: 18px; }
 .check { font-size: 12px; color: #b5b6c5; }

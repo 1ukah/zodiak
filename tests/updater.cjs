@@ -17,7 +17,7 @@ async function main() {
       const result = await build({ entryPoints: [path.join(root, `src/main/${name}.ts`)], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['electron', 'electron-updater'] })
       return result.outputFiles[0].text
     }))
-    function harness({ packaged = true, version = '1.1.0', releases = [betaRelease], responseStatus = 200 } = {}) {
+    function harness({ packaged = true, version = '1.1.0', releases = [betaRelease], responseStatus = 200, platform = 'win32' } = {}) {
       const updater = new EventEmitter()
       const checks = [], requests = [], states = [], progress = []
       let downloads = 0, installed = 0, installArguments
@@ -42,7 +42,7 @@ async function main() {
       }
       function load(bundle) {
         const module = { exports: {} }
-        new Function('require', 'module', 'exports', bundle)(id => id === 'electron' ? electron : id === 'electron-updater' ? { autoUpdater: updater } : require(id), module, module.exports)
+        new Function('require', 'module', 'exports', 'process', bundle)(id => id === 'electron' ? electron : id === 'electron-updater' ? { autoUpdater: updater } : require(id), module, module.exports, { ...process, platform })
         return module.exports
       }
       const api = load(bundles[0]), config = load(bundles[1])
@@ -207,6 +207,16 @@ async function main() {
     await assert.rejects(h.api.performUpdateAction('download'), /installed zodiak build/)
     assert.equal(h.requests.length, 0)
     console.log('PASS Disabled startup checks and development builds skip network/install actions')
+    h = harness({ platform: 'linux' })
+    await h.api.checkForUpdatesOnStartup()
+    await assert.rejects(h.api.requestUpdateCheck(true), /Install a new package/)
+    await assert.rejects(h.api.performUpdateAction('install'), /Install a new package/)
+    assert.equal(h.requests.length, 0)
+    assert.equal(h.checks.length, 0)
+    assert.equal(h.downloads, 0)
+    assert.equal(h.installed, 0)
+    assert.equal(h.state.phase, 'idle')
+    console.log('PASS Linux skips update feeds, downloads and installers')
   } finally {
     assert.equal(path.dirname(profile), path.resolve(os.tmpdir()))
     assert.ok(path.basename(profile).startsWith('zodiak-updater-'))
