@@ -74,6 +74,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Install Linux packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libarchive-tools
+          bsdtar --version
       - name: Install dependencies
         run: npm ci
       - name: Check types and capture behavior
