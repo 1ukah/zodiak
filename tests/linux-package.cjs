@@ -85,12 +85,13 @@ async function main() {
     for (let launch = 0; launch < 2; launch++) {
       const port = await freePort()
       const args = [
-        ...(executable.endsWith('.AppImage') ? ['--appimage-extract-and-run'] : []),
         '--ozone-platform=wayland', `--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1',
       ]
+      const env = { ...process.env, XDG_CONFIG_HOME: configRoot, XDG_CACHE_HOME: path.join(temporary, 'cache') }
+      delete env.APPIMAGE_EXTRACT_AND_RUN
       const child = spawn(executable, args, {
         detached: true,
-        env: { ...process.env, XDG_CONFIG_HOME: configRoot, XDG_CACHE_HOME: path.join(temporary, 'cache') },
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       let log = ''

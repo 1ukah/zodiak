@@ -25,27 +25,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Install Linux packaging tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libarchive-tools
-          bsdtar --version
       - name: Install dependencies
         run: npm ci
       - name: Check types and capture behavior
         run: npm run typecheck && node tests/linux-capture.cjs
-      - name: Build AppImage and archive
+      - name: Build AppImage
         run: npm run pack:linux
-      - name: Build Arch installer package
-        run: npx electron-builder --linux pacman --prepackaged dist/linux-unpacked --publish never
       - name: Upload Linux packages
         uses: actions/upload-artifact@v7
         with:
           name: zodiak-linux-${{ github.run_number }}-${{ github.run_attempt }}
-          path: |
-            dist/*-linux-x86_64.AppImage
-            dist/*-linux-x64.tar.gz
-            dist/*-linux-x64.pacman
+          path: dist/*-linux-x86_64.AppImage
           if-no-files-found: error
           compression-level: 0
           retention-days: 7

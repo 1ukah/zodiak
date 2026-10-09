@@ -20,9 +20,8 @@
     "build:system-audio-capture": "dotnet publish native/system-audio-capture/SystemAudioCapture.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o native/system-audio-capture/publish",
     "version:sync": "node scripts/sync-version.cjs",
     "pack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-installer.ps1",
-    "pack:linux": "npm run version:sync && npm run build && electron-builder --linux AppImage tar.gz --publish never",
+    "pack:linux": "npm run version:sync && npm run build && electron-builder --linux AppImage --publish never",
     "pack:linux:dir": "npm run version:sync && npm run build && electron-builder --linux dir --publish never",
-    "pack:linux:arch": "npm run version:sync && npm run build && electron-builder --linux pacman --publish never",
     "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-installer.ps1 -Publish",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:ui": "electron tests/ui-smoke.cjs",
@@ -55,6 +54,9 @@
     "executableName": "zodiak",
     "asar": true,
     "npmRebuild": false,
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
     "directories": {
       "output": "dist"
     },
@@ -111,27 +113,9 @@
       "maintainer": "Zodiak contributors",
       "syncDesktopName": true,
       "target": [
-        "AppImage",
-        "tar.gz"
+        "AppImage"
       ],
       "artifactName": "${name}-${version}-linux-${arch}.${ext}"
-    },
-    "pacman": {
-      "synopsis": "Screen sharing, voice chat, and text chat with LiveKit.",
-      "depends": [
-        "gtk3",
-        "nss",
-        "alsa-lib",
-        "libxss",
-        "libxtst",
-        "libnotify",
-        "xdg-utils",
-        "at-spi2-core",
-        "mesa",
-        "pipewire",
-        "wireplumber",
-        "xdg-desktop-portal"
-      ]
     },
     "nsis": {
       "oneClick": false,

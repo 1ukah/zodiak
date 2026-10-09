@@ -19,7 +19,6 @@ Zodiak is a Windows and Linux app for screen sharing, text chat, and voice chat.
 
 - [Run a LiveKit server](docs/livekit.md)
 - [Run from source](docs/run-from-source.md)
-- [Linux support and test status](docs/linux-port.md)
 
 ## Screenshot
 
