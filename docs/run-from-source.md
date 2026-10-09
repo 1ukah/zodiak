@@ -54,7 +54,7 @@ npm run pack
 
 This command builds the app and creates `dist/zodiak-setup.exe`.
 
-## Build Linux Packages
+## Build the Linux AppImage
 
 These commands do not build or include the Windows audio helper.
 
@@ -62,38 +62,43 @@ These commands do not build or include the Windows audio helper.
 npm run pack:linux
 ```
 
-This makes an AppImage and a `.tar.gz` archive in `dist/`. For version 1.3.1 on x86_64:
+This makes one AppImage in `dist/`. The Linux builds do not make an Arch package or a `.tar.gz` archive. For version 1.3.1 on x86_64:
 
 ```bash
 chmod +x dist/zodiak-1.3.1-linux-x86_64.AppImage
 ./dist/zodiak-1.3.1-linux-x86_64.AppImage
 ```
 
-If FUSE is not available, use:
+The build uses electron-builder's static AppImage runtime (`toolsets.appimage: "1.0.3"`).
+It does not need the `fuse2` package or `libfuse.so.2` on the user's computer.
+No system package is installed when the AppImage starts.
+See the [electron-builder runtime documentation](https://www.electron.build/v26/docs/appimage/#toolsets).
+
+The AppImage is portable, but it does not work on every Linux system.
+This build is for x86_64 desktop systems with glibc and the libraries required by Electron.
+It does not support ARM or 32-bit computers. Alpine Linux with musl is not a supported target.
+Old distributions or minimal systems can have missing or incompatible libraries.
+Wayland screen capture still needs PipeWire and the correct desktop portal.
+Arch Linux with KDE Wayland is the tested target. Other distributions still need tests.
+
+If the system does not allow FUSE mounting, use:
 
 ```bash
 ./dist/zodiak-1.3.1-linux-x86_64.AppImage --appimage-extract-and-run
 ```
 
+If an AppImage does not open from the file manager, start it in a terminal to see the error.
+Older builds used the FUSE 2 runtime. They can report `dlopen(): error loading libfuse.so.2`.
+Download a new build to get the static runtime. The extraction command also works with older builds.
+
 For a directory package only, use `npm run pack:linux:dir`. Start it with `./dist/linux-unpacked/zodiak`.
 
-For an Arch installer package, use:
-
-```bash
-sudo pacman -S --needed libxcrypt-compat
-npm run pack:linux:arch
-```
-
-`libxcrypt-compat` is a build dependency for electron-builder's package tool. It is not an application dependency. See the [Arch package file list](https://archlinux.org/packages/core/x86_64/libxcrypt-compat/files/).
-
-Install the resulting `.pacman` file with `sudo pacman -U`, then start `zodiak` from the application menu or a terminal. Check the actual filename in `dist/`. Use `sudo pacman -R zodiak` to remove the package. Package installation and removal still need a test on this computer.
-
-All package commands copy the version from `VERSION` to the package metadata. No command above publishes a release.
+The build commands copy the version from `VERSION` to the package metadata. No command above publishes a release.
 
 ## Linux Branch Builds
 
 Each push to `feat/linux` starts the **Build Linux branch packages** workflow.
-It checks types and capture behavior, then builds the AppImage, archive, and Arch package.
+It checks types and capture behavior, then builds only the AppImage.
 It does not need a release tag or a commit on `master`.
 
 To get the packages:
@@ -109,8 +114,11 @@ A new push cancels an older branch build that is still running.
 The package version comes from `VERSION`. You do not need to change it for each test build.
 
 After extraction, make the AppImage executable with `chmod +x` before you start it.
-Use `--appimage-extract-and-run` if FUSE is not available.
-The archive and Arch package use the installation instructions above.
+The GitHub artifact ZIP does not keep executable file permissions.
+You can also enable execution in the file's properties in your file manager.
+This is a Linux security requirement. The AppImage cannot change its own permissions before it starts.
+You do not need to install FUSE 2 for new builds.
+Use `--appimage-extract-and-run` only if the system does not allow FUSE mounting.
 
 These are test builds. They do not create or change a GitHub release.
 They do not build Windows or change its update feed.
@@ -124,8 +132,9 @@ npm run typecheck
 npm run build
 npm run test:linux
 node tests/linux-package.cjs dist/linux-unpacked/zodiak
+node tests/linux-package.cjs dist/zodiak-1.3.1-linux-x86_64.AppImage
 ```
 
-The capture test uses simulated portal responses. The package test opens the real application twice with temporary user folders. It checks settings, identity, and participant volumes. It does not change your normal settings.
+The capture test uses simulated portal responses. The package test opens the real application twice with temporary user folders. It checks settings, identity, and participant volumes. It does not change your normal settings. The AppImage test uses normal startup, without the extraction option.
 
-For the local LiveKit video test and the checks that remain, see [Linux support](linux-port.md).
+Use `npm run test:share:desktop` for the local LiveKit desktop video test. Select a screen or window when KDE opens its selection dialog.
