@@ -78,6 +78,15 @@ export interface DesktopSourceInfo {
   thumbnail: string
 }
 
+export const PORTAL_SOURCE_ID = 'portal'
+
+export interface PlatformCapabilities {
+  capturePicker: 'application' | 'portal'
+  systemAudioCapture: boolean
+  discordAudioExclusion: boolean
+  automaticUpdates: boolean
+}
+
 export interface ShareRequest {
   sourceId: string
   withAudio: boolean
@@ -144,6 +153,7 @@ export type ActionResult<T> = { ok: true; value: T } | { ok: false; error: strin
 export const channels = {
   rendererReady: 'app:renderer-ready',
   getConfig: 'config:get',
+  getPlatformCapabilities: 'app:capabilities',
   saveConfig: 'config:save',
   checkForUpdates: 'update:check',
   getUpdateState: 'update:state:get',
@@ -171,6 +181,7 @@ export const channels = {
 export interface SharescreenApi {
   rendererReady: () => void
   getConfig: () => Promise<AppConfig>
+  getPlatformCapabilities: () => Promise<PlatformCapabilities>
   saveConfig: (config: AppConfig) => Promise<ActionResult<AppConfig>>
   checkForUpdates: (channel?: UpdateChannel) => Promise<ActionResult<true>>
   getUpdateState: () => Promise<UpdateState>

@@ -7,6 +7,9 @@ const participantPreferences = new Map()
 const ok = value => Promise.resolve({ ok: true, value })
 contextBridge.exposeInMainWorld('sharescreen', {
   rendererReady() {}, getConfig: () => Promise.resolve(config),
+  getPlatformCapabilities: () => Promise.resolve(process.env.ZODIAK_TEST_PLATFORM === 'linux'
+    ? { capturePicker: 'portal', systemAudioCapture: false, discordAudioExclusion: false, automaticUpdates: false }
+    : { capturePicker: 'application', systemAudioCapture: true, discordAudioExclusion: true, automaticUpdates: true }),
   saveConfig: next => { config = next; return ok(config) },
   checkForUpdates: channel => { lastUpdateChannel = channel; return ok(true) },
   getTestUpdateChannel: () => Promise.resolve(lastUpdateChannel),

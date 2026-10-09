@@ -1,12 +1,27 @@
 import { desktopCapturer, session, type DesktopCapturerSource } from 'electron'
-import type { DesktopSourceInfo, ShareRequest } from '../shared/types'
+import { PORTAL_SOURCE_ID, type DesktopSourceInfo, type ShareRequest } from '../shared/types'
+import { getPlatformCapabilities } from './platform'
 
 interface PendingShare {
   sourceId: string
-  withAudio: boolean
+  generation: number
 }
 
 let pending: PendingShare | null = null
+let generation = 0
+
+export function validateCaptureRequest(request: ShareRequest): void {
+  const capabilities = getPlatformCapabilities()
+  if (request.withAudio && !capabilities.systemAudioCapture) throw new Error('System audio sharing is not available on this platform')
+  if (request.blockDiscordAudio && !capabilities.discordAudioExclusion) throw new Error('Discord audio exclusion is not available on this platform')
+  if (capabilities.capturePicker === 'portal' && request.sourceId !== PORTAL_SOURCE_ID) throw new Error('Choose a screen or window with the desktop picker')
+  if (capabilities.capturePicker !== 'portal' && request.sourceId === PORTAL_SOURCE_ID) throw new Error('Choose a screen or window')
+}
+
+export function cancelCapture(): void {
+  generation++
+  pending = null
+}
 
 export function registerCaptureHandler(): void {
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
@@ -17,18 +32,17 @@ export function registerCaptureHandler(): void {
       return
     }
     void desktopCapturer
-      .getSources({ types: [current.sourceId.startsWith('screen:') ? 'screen' : 'window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })
+      .getSources({ types: current.sourceId === PORTAL_SOURCE_ID ? ['screen', 'window'] : [current.sourceId.startsWith('screen:') ? 'screen' : 'window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })
       .then((sources) => {
-        const match = sources.find((source) => source.id === current.sourceId)
-        if (!match) {
+        const match = current.sourceId === PORTAL_SOURCE_ID ? sources[0] : sources.find((source) => source.id === current.sourceId)
+        if (!match || current.generation !== generation) {
           callback({})
           return
         }
         callback({
-          video: { id: match.id, name: match.name },
-          // Electron's Chromium capture path provides system loopback audio. It is
-          // intentionally used instead of a separately compiled Windows helper.
-          audio: current.withAudio && request.audioRequested ? 'loopback' : undefined,
+          // Keep the portal source intact. Screen audio is published separately
+          // by the Windows helper, never by display-media loopback.
+          video: match,
         })
       })
       .catch(() => {
@@ -38,10 +52,13 @@ export function registerCaptureHandler(): void {
 }
 
 export function armCapture(request: ShareRequest): void {
-  pending = { sourceId: request.sourceId, withAudio: request.withAudio }
+  validateCaptureRequest(request)
+  pending = { sourceId: request.sourceId, generation: ++generation }
 }
 
 export async function listSources(): Promise<DesktopSourceInfo[]> {
+  // Opening the quality dialog must not open a Wayland consent dialog.
+  if (getPlatformCapabilities().capturePicker === 'portal') return []
   const sources = await desktopCapturer.getSources({
     types: ['screen', 'window'],
     thumbnailSize: { width: 360, height: 202 },

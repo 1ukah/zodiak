@@ -1,10 +1,11 @@
 import { app, BrowserWindow } from 'electron'
-import electronUpdater, { type ProgressInfo } from 'electron-updater'
+import electronUpdater, { type AppUpdater, type ProgressInfo } from 'electron-updater'
+import { getPlatformCapabilities } from './platform'
 import { loadConfig, requireUpdateChannel } from './config'
 import { getUpdateFeed } from './update-feed'
 import { channels, type UpdateChannel, type UpdateState } from '../shared/types'
 
-const { autoUpdater } = electronUpdater
+let autoUpdater: AppUpdater
 let getWindow: () => BrowserWindow | null = () => null
 let updateCheckInFlight = false
 let manualCheckRequested = false
@@ -43,6 +44,7 @@ export async function performUpdateAction(action: unknown): Promise<void> {
   if (action !== 'download' && action !== 'install' && action !== 'retry' && action !== 'dismiss') {
     throw new Error('Invalid update action')
   }
+  if (!getPlatformCapabilities().automaticUpdates) throw new Error('Install a new package to update this application')
   if (!app.isPackaged) throw new Error('Updates are available only in an installed zodiak build')
   if (action === 'dismiss') {
     if (state.phase === 'downloading' || state.phase === 'installing' || state.phase === 'checking') return
@@ -77,7 +79,8 @@ export async function performUpdateAction(action: unknown): Promise<void> {
 /** Configures the packaged-app updater once Electron is ready. */
 export function initializeUpdater(windowProvider: () => BrowserWindow | null): void {
   getWindow = windowProvider
-  if (!app.isPackaged) return
+  if (!app.isPackaged || !getPlatformCapabilities().automaticUpdates) return
+  autoUpdater = electronUpdater.autoUpdater
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
   // Published releases contain the complete custom setup, without blockmaps.
@@ -109,6 +112,10 @@ export function initializeUpdater(windowProvider: () => BrowserWindow | null): v
 }
 
 export async function requestUpdateCheck(manual = false, requestedChannel?: unknown): Promise<void> {
+  if (!getPlatformCapabilities().automaticUpdates) {
+    if (manual) throw new Error('Install a new package to update this application')
+    return
+  }
   if (!app.isPackaged) {
     if (manual) throw new Error('Updates are available only in an installed zodiak build')
     return
