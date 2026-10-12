@@ -665,6 +665,9 @@ async function openPicker(): Promise<void> {
   if (!currentRoom) return
   picker.showModal(); clearNote(pickerNote); syncSystemAudioControls(); syncQualityControls()
   void loadCaptureAcceleration()
+  capabilities = await window.sharescreen.getPlatformCapabilities()
+  if (!picker.open) return
+  syncSystemAudioControls()
   const portal = capabilities.capturePicker === 'portal'
   sourcesEl.hidden = portal
   refreshButton.hidden = portal

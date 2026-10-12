@@ -90,7 +90,7 @@ export interface PlatformCapabilities {
 export interface ShareRequest {
   sourceId: string
   withAudio: boolean
-  /** Temporarily blocks Discord audio from a system-audio share. */
+  /** Excludes Discord playback from the share; local playback is preserved on Linux. */
   blockDiscordAudio: boolean
 }
 
@@ -173,6 +173,7 @@ export const channels = {
   startSystemAudio: 'audio:start',
   stopSystemAudio: 'audio:stop',
   systemAudioData: 'audio:data',
+  systemAudioError: 'audio:error',
   setWindowFullscreen: 'window:set-fullscreen',
   windowFullscreenChanged: 'window:fullscreen-changed',
   windowVisibilityChanged: 'window:visibility-changed',
@@ -201,6 +202,7 @@ export interface SharescreenApi {
   startSystemAudio: (excludeDiscord: boolean) => Promise<ActionResult<true>>
   stopSystemAudio: () => Promise<ActionResult<true>>
   onSystemAudio: (listener: (pcm: Uint8Array) => void) => () => void
+  onSystemAudioError: (listener: (message: string) => void) => () => void
   setWindowFullscreen: (active: boolean) => Promise<ActionResult<boolean>>
   onWindowFullscreenChanged: (listener: (active: boolean) => void) => () => void
   onWindowVisibilityChanged: (listener: (visible: boolean) => void) => () => void

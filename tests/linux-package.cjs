@@ -114,8 +114,24 @@ async function main() {
         assert.equal(loaded, true, 'Production renderer must load the saved user configuration')
         const capabilities = await client.evaluate('window.sharescreen.getPlatformCapabilities()')
         assert.equal(capabilities.capturePicker, 'portal')
-        assert.equal(capabilities.systemAudioCapture, false)
+        assert.equal(capabilities.systemAudioCapture, true)
+        assert.equal(capabilities.discordAudioExclusion, true)
         assert.equal(capabilities.automaticUpdates, false)
+        const audio = await client.evaluate(`(async () => {
+          window.packageAudioBytes = 0;
+          window.packageAudioError = '';
+          const unsubscribe = window.sharescreen.onSystemAudio(pcm => { window.packageAudioBytes += pcm.byteLength });
+          const unsubscribeError = window.sharescreen.onSystemAudioError(message => { window.packageAudioError = message });
+          const result = await window.sharescreen.startSystemAudio(true);
+          await new Promise(resolve => setTimeout(resolve, 300));
+          await window.sharescreen.stopSystemAudio();
+          unsubscribe(); unsubscribeError();
+          return {result, bytes: window.packageAudioBytes, error: window.packageAudioError};
+        })()`)
+        assert.equal(audio.result.ok, true, 'Packaged helper must start through the real preload and IPC')
+        assert(audio.bytes > 10000, 'Packaged PCM must reach the renderer')
+        assert.equal(audio.error, '')
+        console.log('PASS Packaged PipeWire helper streams PCM through production IPC and stops cleanly')
         const identity = JSON.parse(await fs.readFile(path.join(profile, 'identity.json'), 'utf8')).uuid
         assert.match(identity, /^[0-9a-f-]{36}$/)
         if (!launch) {

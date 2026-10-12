@@ -34,6 +34,13 @@ const api = {
     ipcRenderer.on(channels.systemAudioData, wrapped)
     return () => ipcRenderer.removeListener(channels.systemAudioData, wrapped)
   },
+  onSystemAudioError: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, message: unknown): void => {
+      if (typeof message === 'string') listener(message)
+    }
+    ipcRenderer.on(channels.systemAudioError, wrapped)
+    return () => ipcRenderer.removeListener(channels.systemAudioError, wrapped)
+  },
   setWindowFullscreen: (active) => ipcRenderer.invoke(channels.setWindowFullscreen, active),
   onWindowFullscreenChanged: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, active: unknown): void => {

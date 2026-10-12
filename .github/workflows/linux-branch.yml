@@ -25,10 +25,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Install PipeWire build and test dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libpipewire-0.3-dev pipewire-bin
       - name: Install dependencies
         run: npm ci
       - name: Check types and capture behavior
-        run: npm run typecheck && node tests/linux-capture.cjs
+        run: npm run typecheck && node tests/linux-capture.cjs && node tests/system-audio-main.cjs && node tests/system-audio-renderer.cjs && npm run test:pipewire
       - name: Build AppImage
         run: npm run pack:linux
       - name: Upload Linux packages
