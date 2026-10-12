@@ -225,12 +225,17 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
   const preference = encodingPreferenceFor(quality.priority)
   let protectedAudio: MediaStreamTrack | null = null
   try {
-    if (withAudio) protectedAudio = await openSystemAudioTrack(excludeDiscord)
+    if (withAudio) protectedAudio = await openSystemAudioTrack(excludeDiscord, (message) => {
+      if (room === current) {
+        hooks?.onError(`Screen audio stopped: ${message}`)
+        void stopScreenAudio(current, true).catch(() => undefined)
+      }
+    })
     const publication = await current.localParticipant.setScreenShareEnabled(
       true,
       {
-        // Chromium loopback is already mixed. Publish the protected WASAPI
-        // process-loopback track instead so this app's audio cannot feed back.
+        // The platform helper filters application playback before mixing.
+        // Publish its audio separately from desktop video.
         audio: false,
         contentHint: preference.contentHint,
         resolution: { width: dimensions.width, height: dimensions.height, frameRate: quality.frameRate },
@@ -255,6 +260,7 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
     }
     localScreenTargetBitrate = shareBitrateFor(quality)
     if (protectedAudio) {
+      if (protectedAudio.readyState !== 'live') throw new Error('System audio capture stopped before sharing started')
       await current.localParticipant.publishTrack(protectedAudio, {
         source: Track.Source.ScreenShareAudio,
         name: 'screen-audio',
@@ -334,14 +340,14 @@ export async function unpublishScreen(): Promise<void> {
   }
 }
 
-async function stopScreenAudio(current: Room): Promise<void> {
+async function stopScreenAudio(current: Room, keepVideoSharing = false): Promise<void> {
   const audio = current.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)?.track
   // Stop capture immediately, before waiting for any signaling. LiveKit's
   // setScreenShareEnabled(false) only removes audio if video still exists.
   const closing = closeSystemAudio()
   await Promise.all([
     closing,
-    window.sharescreen?.setSharing(false),
+    keepVideoSharing ? undefined : window.sharescreen?.setSharing(false),
     audio ? current.localParticipant.unpublishTrack(audio, true) : undefined,
   ])
 }

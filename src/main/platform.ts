@@ -5,11 +5,12 @@ export function getPlatformCapabilities(
   environment: NodeJS.ProcessEnv = process.env,
 ): PlatformCapabilities {
   const windows = platform === 'win32'
+  const audio = windows || platform === 'linux'
   const wayland = platform === 'linux' && (environment.XDG_SESSION_TYPE === 'wayland' || Boolean(environment.WAYLAND_DISPLAY))
   return {
     capturePicker: wayland ? 'portal' : 'application',
-    systemAudioCapture: windows,
-    discordAudioExclusion: windows,
+    systemAudioCapture: audio,
+    discordAudioExclusion: audio,
     automaticUpdates: windows,
   }
 }

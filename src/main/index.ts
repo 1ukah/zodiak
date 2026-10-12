@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { channels, shareBitrateRangeFor, supportsShareQuality, type CaptureAccelerationStatus, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareResolution, type ShareStartRequest } from '../shared/types'
 import { armCapture, cancelCapture, listSources, registerCaptureHandler, validateCaptureRequest } from './capture'
 import { getPlatformCapabilities } from './platform'
-import { startSystemAudio, stopSystemAudio } from './system-audio'
+import { startSystemAudio, stopSystemAudio, systemAudioAvailable } from './system-audio'
 import { loadConfig, saveConfig } from './config'
 import { isRecord } from './parse'
 import { settle } from './result'
@@ -295,7 +295,11 @@ function captureAccelerationStatus(): CaptureAccelerationStatus {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(channels.getPlatformCapabilities, () => getPlatformCapabilities())
+  ipcMain.handle(channels.getPlatformCapabilities, async () => {
+    const capabilities = getPlatformCapabilities()
+    const audio = capabilities.systemAudioCapture && await systemAudioAvailable()
+    return { ...capabilities, systemAudioCapture: audio, discordAudioExclusion: audio }
+  })
   ipcMain.handle(channels.getConfig, async () => { await getLocalIdentity(); return loadConfig() })
   ipcMain.handle(channels.getParticipantPreferences, (_event, server: unknown) => settle(() => getParticipantPreferences(server)))
   ipcMain.handle(channels.saveParticipantPreferences, (_event, payload: unknown) => settle(async () => { await saveParticipantPreferences(payload); return true as const }))
@@ -327,8 +331,8 @@ function registerIpc(): void {
   ipcMain.handle(channels.prepareShare, (_event, payload: unknown) =>
     settle(async () => {
       const request = parseShareRequest(payload)
-      // System audio always uses the protected WASAPI track, which excludes
-      // this app's process tree and prevents remote stream audio from looping.
+      // Audio is captured separately by the platform helper, excluding this
+      // app's playback to prevent remote room audio from feeding back.
       armCapture({ ...request, withAudio: false })
       return true as const
     }),

@@ -41,7 +41,7 @@ export function registerCaptureHandler(): void {
         }
         callback({
           // Keep the portal source intact. Screen audio is published separately
-          // by the Windows helper, never by display-media loopback.
+          // by the platform audio helper, never by display-media loopback.
           video: match,
         })
       })

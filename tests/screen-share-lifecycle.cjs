@@ -19,6 +19,7 @@ const bridge = `
 import { LocalAudioTrack, LocalVideoTrack, LocalTrackPublication, ParticipantEvent, TrackEvent, LogLevel, setLogLevel } from 'livekit-client'
 import { TrackInfo } from '@livekit/protocol'
 setLogLevel(LogLevel.error)
+let audioErrorListener;
 let nativeRunning = false, subscribed = false, sharing = false, audioTrack, videoTrack;
 let pendingAudio = false, releaseAudio, rejectStop = false, closeBeforeVideoReturns = false;
 let publishedAudio = 0, stopCalls = 0;
@@ -28,6 +29,7 @@ window.AudioContext = class extends NativeAudioContext {
   createMediaStreamDestination() { contexts.push(this); return super.createMediaStreamDestination() }
 };
 window.sharescreen = {
+  onSystemAudioError(listener) { audioErrorListener = listener; return () => { audioErrorListener = null } },
   onSystemAudio() { subscribed = true; return () => { subscribed = false } },
   async startSystemAudio() { nativeRunning = true; return { ok: true, value: true } },
   async stopSystemAudio() { nativeRunning = false; stopCalls++; return { ok: true, value: true } },
@@ -85,6 +87,7 @@ window.shareTest = {
   closeDuringVideoPublish() { closeBeforeVideoReturns = true },
   async settle() { await new Promise(resolve => setTimeout(resolve, 50)) },
   failStop() { rejectStop = true },
+  failAudio() { audioErrorListener?.('PipeWire connection lost') },
   stop: unpublishScreen,
   leave: leaveRoom,
   disconnect() { room.emit(RoomEvent.Disconnected, DisconnectReason.CLIENT_INITIATED) },
@@ -158,6 +161,14 @@ app.whenReady().then(async () => {
   assert.equal((await snapshot()).video, false)
   assert.equal((await snapshot()).nativeRunning, false)
   console.log('PASS Window shares without audio also shut down cleanly')
+
+  await run('await window.shareTest.setup(); await window.shareTest.publish(); window.shareTest.failAudio(); await window.shareTest.settle()')
+  state = await snapshot()
+  assertStopped(state)
+  assert.equal(state.video, true)
+  assert.equal(state.sharing, true)
+  assert(state.errors.includes('Screen audio stopped: PipeWire connection lost'))
+  console.log('PASS Helper failure removes screen audio and reports the error while preserving live video')
 
   await run('await window.shareTest.setup(); await window.shareTest.publish(); await window.shareTest.leave(); await window.shareTest.settle()')
   assertStopped(await snapshot())

@@ -14,8 +14,8 @@
   "main": "./out/main/index.js",
   "scripts": {
     "postinstall": "node ./node_modules/electron/install.js",
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "node scripts/prepare-native-audio.cjs && electron-vite dev",
+    "build": "node scripts/prepare-native-audio.cjs && electron-vite build",
     "start": "electron-vite preview",
     "build:system-audio-capture": "dotnet publish native/system-audio-capture/SystemAudioCapture.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o native/system-audio-capture/publish",
     "version:sync": "node scripts/sync-version.cjs",
@@ -34,7 +34,7 @@
     "test:share": "electron tests/screen-share-lifecycle.cjs",
     "test:share:live": "electron tests/screen-share-live.cjs",
     "test:share:desktop": "electron tests/screen-share-live.cjs --desktop --ozone-platform=wayland",
-    "test:linux": "node tests/linux-capture.cjs && electron tests/linux-ui.cjs",
+    "test:linux": "node tests/linux-capture.cjs && node tests/system-audio-main.cjs && node tests/system-audio-renderer.cjs && electron tests/linux-ui.cjs",
     "test:linux:package": "node tests/linux-package.cjs",
     "test:pcm": "node tests/system-audio-processor.cjs",
     "test:telemetry": "electron tests/stream-telemetry.cjs",
@@ -46,7 +46,9 @@
     "test:loopback": "electron tests/microphone-loopback.cjs",
     "test:voice:live": "electron tests/voice-live.cjs",
     "test:voice:background": "npm run build && electron tests/voice-background.cjs",
-    "test:startup": "npm run build && electron tests/startup-smoke.cjs"
+    "test:startup": "npm run build && electron tests/startup-smoke.cjs",
+    "build:pipewire-audio": "node scripts/build-pipewire-audio.cjs",
+    "test:pipewire": "npm run build:pipewire-audio && node tests/pipewire-audio.cjs"
   },
   "build": {
     "appId": "app.zodiak",
@@ -115,7 +117,13 @@
       "target": [
         "AppImage"
       ],
-      "artifactName": "${name}-${version}-linux-${arch}.${ext}"
+      "artifactName": "${name}-${version}-linux-${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": "native/pipewire-audio/publish/zodiak-pipewire-audio",
+          "to": "pipewire-audio/zodiak-pipewire-audio"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,

@@ -9,11 +9,11 @@ Zodiak is a Windows and Linux app for screen sharing, text chat, and voice chat.
 ## Features
 
 - Create and join rooms.
-- Share a screen or window. Sending system audio is currently Windows-only.
+- Share a screen or window.
 - Watch several screen shares at the same time.
 - Use text chat in a room or send private messages.
 - Use voice chat in a room.
-- Exclude Discord audio from your screen share on Windows.
+- Exclude Discord audio from your screen share.
 
 ## Setup
 

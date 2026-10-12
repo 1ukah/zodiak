@@ -1,6 +1,7 @@
 const { contextBridge } = require('electron')
 let config = { url: 'ws://localhost:7880', apiKey: 'test', apiSecret: 'test', displayName: 'Alex Morgan', showStreamStatistics: false, checkForUpdatesOnStartup: true, voiceEnabled: true, voiceInputDeviceId: 'default', voiceInputVolume: 1, voiceNoiseSuppression: true, chatPosition: 'bottom' }
 let rooms = [{ name: 'the-lounge', participants: 3, sharing: false }, { name: 'watch-party', participants: 2, sharing: true }, { name: 'after-hours', participants: 0, sharing: false }]
+let systemAudioAvailable = true
 let serverAvailable = true
 let lastUpdateChannel = null
 const participantPreferences = new Map()
@@ -8,8 +9,9 @@ const ok = value => Promise.resolve({ ok: true, value })
 contextBridge.exposeInMainWorld('sharescreen', {
   rendererReady() {}, getConfig: () => Promise.resolve(config),
   getPlatformCapabilities: () => Promise.resolve(process.env.ZODIAK_TEST_PLATFORM === 'linux'
-    ? { capturePicker: 'portal', systemAudioCapture: false, discordAudioExclusion: false, automaticUpdates: false }
+    ? { capturePicker: 'portal', systemAudioCapture: systemAudioAvailable, discordAudioExclusion: systemAudioAvailable, automaticUpdates: false }
     : { capturePicker: 'application', systemAudioCapture: true, discordAudioExclusion: true, automaticUpdates: true }),
+  setTestSystemAudioAvailable: value => { systemAudioAvailable = Boolean(value) },
   saveConfig: next => { config = next; return ok(config) },
   checkForUpdates: channel => { lastUpdateChannel = channel; return ok(true) },
   getTestUpdateChannel: () => Promise.resolve(lastUpdateChannel),
