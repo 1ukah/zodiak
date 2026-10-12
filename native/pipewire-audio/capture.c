@@ -13,6 +13,12 @@
 #include <string.h>
 #include <math.h>
 
+// PipeWire 0.3.48 (Ubuntu 22.04) predates this flag. Keep its stable ABI
+// value so builds using older headers also handle silence on newer runtimes.
+#ifndef SPA_CHUNK_FLAG_EMPTY
+#define SPA_CHUNK_FLAG_EMPTY (1u << 1)
+#endif
+
 // One capture adapter mixes explicitly linked playback ports. Existing device
 // links are untouched; no microphone or mixed device-monitor is ever linked.
 #define RING_SIZE 32768u // < 200 ms of 48 kHz stereo S16LE

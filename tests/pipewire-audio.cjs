@@ -4,7 +4,7 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const os = require('node:os')
 const { spawn, execFileSync } = require('node:child_process')
-const helper = path.resolve('native/pipewire-audio/publish/zodiak-pipewire-audio')
+const helper = path.resolve(process.env.ZODIAK_PIPEWIRE_HELPER || 'native/pipewire-audio/publish/zodiak-pipewire-audio')
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 let root, env
 const children = new Set()
@@ -30,16 +30,13 @@ function graph() { return JSON.parse(execFileSync('pw-dump', [], { env, encoding
 function props(o) { return o.info?.props || {} }
 async function tone(frequency, name, extra = {}, options = {}) {
   const rate = options.rate || 48000, channels = options.channels || 2
-  const data = Buffer.alloc(rate * channels * 2 * 30)
-  for (let i = 0; i < rate * 30; i++) {
-    const value = Math.round(3000 * Math.sin(2 * Math.PI * frequency * i / rate))
-    for (let ch = 0; ch < channels; ch++) data.writeInt16LE(options.center && ch !== 2 ? 0 : value, (i * channels + ch) * 2)
-  }
-  const file = path.join(root, `${name}.raw`)
-  await fs.writeFile(file, data)
   const properties = { 'application.name': name, 'node.name': name, 'adapter.auto-port-config': { mode: 'dsp', monitor: false, position: 'preserve' }, ...extra }
-  const child = launch('pw-cat', ['--playback', '--target', '0', '--latency', '10ms', '--rate', String(rate), '--channels', String(channels), '--format', 's16', '--volume', String(options.volume ?? 1), '--raw', '--properties', JSON.stringify(properties), ...(options.center ? ['--channel-map', 'FL,FR,FC,LFE,RL,RR'] : []), file])
-  await until(() => graph().some(o => props(o)['node.name'] === name), name + ' node')
+  const child = launch(path.join(root, 'tone'), [String(frequency), String(rate), String(channels), options.center ? '1' : '0', JSON.stringify(properties)])
+  await until(() => graph().some(o => o.type.endsWith(':Node') && props(o)['node.name'] === name && o.info['n-output-ports'] >= channels), name + ' node')
+  if (options.volume !== undefined) {
+    const node = graph().find(o => o.type.endsWith(':Node') && props(o)['node.name'] === name)
+    execFileSync('pw-cli', ['set-param', String(node.id), 'Props', `{ volume = ${options.volume} }`], { env })
+  }
   // Simulate normal local playback, which the helper must leave intact.
   if (channels === 2 && !extra['media.class']) for (const ch of ['FL', 'FR']) execFileSync('pw-link', [`${name}:output_${ch}`, `local-output:playback_${ch}`], { env })
   return child
@@ -72,6 +69,8 @@ function playbackLinks(g) { return g.filter(o => o.type.endsWith(':Link') && pro
 async function main() {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'zodiak-pipewire-'))
   env = { ...process.env, PIPEWIRE_RUNTIME_DIR: root, PIPEWIRE_REMOTE: 'zodiak-test' }
+  const flags = execFileSync('pkg-config', ['--cflags', '--libs', 'libpipewire-0.3'], { env, encoding: 'utf8' }).trim().split(/\s+/)
+  execFileSync(process.env.CC || 'cc', ['-std=gnu11', '-O2', '-Wall', '-Wextra', '-Werror', '-pthread', path.join(__dirname, 'pipewire-tone.c'), '-o', path.join(root, 'tone'), ...flags, '-lm'], { env })
   const config = `context.properties = { core.daemon = true core.name = zodiak-test default.clock.rate = 48000 default.clock.quantum = 480 }
 context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
 context.modules = [ { name = libpipewire-module-protocol-native } { name = libpipewire-module-client-node } { name = libpipewire-module-adapter } { name = libpipewire-module-link-factory } { name = libpipewire-module-spa-node-factory } { name = libpipewire-module-metadata } { name = libpipewire-module-access } ]
@@ -101,7 +100,7 @@ context.objects = [ { factory = spa-node-factory args = { factory.name = support
   present(cap, 440); present(cap, 660, 1500); absent(cap, 880); absent(cap, 1100); absent(cap, 1320)
   assert.deepEqual(playbackLinks(graph()), before)
   console.log('PASS Mixed application PCM, per-app volume, Discord exclusion, self exclusion, no microphone, local routing preserved')
-  const gameId = graph().find(o => props(o)['node.name'] === 'game').id
+  const gameId = graph().find(o => o.type.endsWith(':Node') && props(o)['node.name'] === 'game').id
   execFileSync('pw-cli', ['set-param', String(gameId), 'Props', '{ mute = true }'], { env })
   await pause(1200)
   absent(cap, 440); present(cap, 660, 1500)
