@@ -89,6 +89,31 @@ export class RoomChat {
       const conversation = this.conversations.get(this.active)
       if (conversation && !this.input.disabled) void this.prepareImages(files, conversation)
     })
+    // Dragged files use the same validation and draft path as pasted images.
+    let dragDepth = 0
+    const carriesFiles = (event: DragEvent) => event.dataTransfer?.types.includes('Files') === true
+    const endDrag = () => { dragDepth = 0; this.panel.classList.remove('is-drop-target') }
+    this.panel.addEventListener('dragenter', event => {
+      if (!carriesFiles(event)) return
+      event.preventDefault()
+      if (dragDepth++ === 0 && !this.input.disabled) this.panel.classList.add('is-drop-target')
+    })
+    this.panel.addEventListener('dragover', event => {
+      if (!carriesFiles(event)) return
+      event.preventDefault()
+      event.dataTransfer!.dropEffect = this.input.disabled ? 'none' : 'copy'
+    })
+    this.panel.addEventListener('dragleave', event => {
+      if (carriesFiles(event) && --dragDepth <= 0) endDrag()
+    })
+    this.panel.addEventListener('drop', event => {
+      if (!carriesFiles(event)) return
+      event.preventDefault()
+      endDrag()
+      const files = [...(event.dataTransfer?.files ?? [])]
+      const conversation = this.conversations.get(this.active)
+      if (files.length && conversation && !this.input.disabled) void this.prepareImages(files, conversation)
+    })
     this.imageDialog.addEventListener('close', () => this.clearFullImage())
     this.imageDialog.addEventListener('click', event => { if (event.target === this.imageDialog) this.imageDialog.close() })
     this.imageDialog.addEventListener('keydown', event => {

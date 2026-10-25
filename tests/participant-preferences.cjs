@@ -74,7 +74,7 @@ async function main() {
     assert((await fs.readdir(profile)).every(name=>!name.endsWith('.tmp')),'Atomic writes must clean temporary files')
     await assert.rejects(async()=>api.saveParticipantPreferences({server,participants:[{id:friend,name:'New name',volume:NaN}]}),/Invalid participant volume/)
     await api.saveParticipantPreferences({server,participants:[{id:friend,name:'New name',volume:5}]})
-    assert.equal((await api.getParticipantPreferences(server))[friend].volume,1)
+    assert.equal((await api.getParticipantPreferences(server))[friend].volume,2,'Saved volumes are capped at 200%')
     // Dictionary keys received over IPC cannot interfere with object prototypes.
     await api.saveParticipantPreferences({server,participants:[{id:'__proto__',name:'Legacy client',volume:.2}]})
     assert.equal((await api.getParticipantPreferences(server))['__proto__'].volume,.2)

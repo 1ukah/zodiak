@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, powerSaveBlocker, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, powerSaveBlocker, session, shell, Tray } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { channels, shareBitrateRangeFor, supportsShareQuality, type CaptureAccelerationStatus, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareResolution, type ShareStartRequest } from '../shared/types'
@@ -15,6 +15,12 @@ import { flushParticipantPreferences, getParticipantPreferences, saveParticipant
 // video_encode feature state before a share begins.
 app.setName('zodiak')
 if (process.platform === 'win32') app.setAppUserModelId('app.zodiak')
+// Playing <video> elements otherwise register a Windows media session, so
+// media keys pressed in a game can pause streams instead of the user's player.
+app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling')
+// The frameless window never shows a menu; skip building Electron's default
+// one (and its reload/devtools accelerators) in installed builds.
+if (app.isPackaged) Menu.setApplicationMenu(null)
 
 // Installed builds keep every app-managed file next to the executable, inside
 // the directory the user selected in the installer. Development keeps its
@@ -122,6 +128,9 @@ function createWindow(splash: BrowserWindow | null = null): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // There is no context menu to apply suggestions, so the spellchecker
+      // would only cost memory and per-keystroke work in chat.
+      spellcheck: false,
       // Microphone AudioWorklets and WebRTC must keep their scheduling when
       // covered, unfocused, or minimized. Native visibility events below still
       // pause the video UI and background roster/telemetry work explicitly.
@@ -369,17 +378,33 @@ function registerPermissions(): void {
 // Multiple launches must not create independent Chromium/GPU/audio process trees.
 const primaryInstance = app.requestSingleInstanceLock()
 if (!primaryInstance) app.quit()
-app.on('second-instance', () => {
+function showMainWindow(): void {
   const win = BrowserWindow.getAllWindows().find(window => window.getBounds().width !== 360)
   if (!win) return
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
-})
+}
+app.on('second-instance', showMainWindow)
+
+let tray: Tray | null = null
+function createTray(): void {
+  tray = new Tray(appIcon())
+  tray.setToolTip('zodiak')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open zodiak', click: showMainWindow },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() },
+  ]))
+  tray.on('click', showMainWindow)
+}
+// Windows can leave a stale notification-area icon unless it is removed explicitly.
+app.on('will-quit', () => { tray?.destroy(); tray = null })
 
 if (primaryInstance) app.whenReady().then(() => {
   registerPermissions()
   registerIpc()
+  createTray()
   const splash = createSplash()
   // Let the small splash paint before loading the main renderer and its modules.
   splash.once('ready-to-show', () => {

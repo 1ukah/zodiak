@@ -218,7 +218,7 @@ app.whenReady().then(async () => {
   await run('window.voiceTest.outputVolume(.5)');const outputHalf=await run('window.voiceTest.measureOutput()');
   assert(Math.abs(outputHalf/outputFull-.5)<.12, 'Voice output at 50% must halve the actual samples')
   await run('window.voiceTest.outputVolume(2)');const outputDouble=await run('window.voiceTest.measureOutput()');
-  assert(Math.abs(outputDouble/outputFull-2)<.2, 'Voice output at 200% must double the actual samples')
+  assert(Math.abs(outputDouble/outputFull-4)<.4, 'Voice output at 200% must apply the boosted 4x (+12 dB) gain to the actual samples')
   await run('window.voiceTest.outputVolume(0)');assert(await run('window.voiceTest.measureOutput()')<.00001)
   await new Promise(resolve=>setTimeout(resolve,1000))
   assert((await snapshot()).elements.every(element=>element.receiverMuted&&element.receiverVolume===0), 'Raw WebRTC receivers must not bypass zero processed volume')
@@ -252,8 +252,9 @@ app.whenReady().then(async () => {
   assert.equal((await snapshot()).state.participants.find(person=>person.id==='bob').volume,0)
   assert(await run('window.voiceTest.measureOutput()')<.00001,'Zero participant volume must silence the processed signal')
   assert(await run("window.voiceTest.measureOutput('alice')")>.01,'Silencing one participant must keep the other participant audible')
-  await run("window.voiceTest.participantVolume('bob',2);window.voiceTest.participantVolume('alice',.25);window.voiceTest.remove('alice');window.voiceTest.add('alice')")
-  assert.equal((await snapshot()).state.participants.find(person=>person.id==='bob').volume,1)
+  await run("window.voiceTest.participantVolume('bob',5);window.voiceTest.participantVolume('alice',.25);window.voiceTest.remove('alice');window.voiceTest.add('alice')")
+  assert.equal((await snapshot()).state.participants.find(person=>person.id==='bob').volume,2,'Participant volume is capped at 200%')
+  await run("window.voiceTest.participantVolume('bob',1)")
   assert.equal((await snapshot()).state.participants.find(person=>person.id==='alice').volume,.25,'Departure and rejoining must preserve individual volume')
   await run("window.voiceTest.remove('alice');window.voiceTest.outputVolume(1)")
   console.log('PASS Individual voice volume changes decoded samples independently, combines with global gain, and survives departure and reattachment')

@@ -5,7 +5,7 @@ import { RoomChat } from './chat'
 import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, setVoiceParticipantMuted, setVoiceParticipantVolume, setMicrophoneTestActive } from './session-loader'
 import type { VoiceState } from './voice'
 import type { LoopbackSettings, MicrophoneLoopback } from './microphone-loopback'
-import { setViewerVisible } from './session-loader'
+import { setViewerVisible, setVoiceInputLevelReporting } from './session-loader'
 import type { ParticipantPreference, ParticipantPreferenceUpdate } from '../../shared/types'
 import { initializeUpdateUI } from './update-ui'
 
@@ -56,7 +56,7 @@ const membersCount = byId('members-count', HTMLSpanElement)
 const membersList = elementById('members-list')
 const participantAudio = Object.assign(document.createElement('div'), { id: 'participant-audio', className: 'participant-audio', popover: 'manual' })
 const participantAudioMute = Object.assign(document.createElement('button'), { type: 'button', className: 'focused-stream-mute' })
-const participantAudioSlider = Object.assign(document.createElement('input'), { id: 'participant-audio-volume', type: 'range', min: '0', max: '100', value: '100' })
+const participantAudioSlider = Object.assign(document.createElement('input'), { id: 'participant-audio-volume', type: 'range', min: '0', max: '200', value: '100' })
 const participantAudioValue = Object.assign(document.createElement('output'), { value: '100%' })
 participantAudioValue.htmlFor = participantAudioSlider.id
 participantAudio.setAttribute('role', 'group')
@@ -151,6 +151,8 @@ let windowFullscreen = false
 let windowVisible = true
 let screenControlsVisible = false
 let screenControlsTimer: number | null = null
+// Keyed by participant: a re-shared screen is a new stream but keeps the same
+// audio level in the session, so the sliders must show that level too.
 const streamVolumes = new Map<string, number>()
 let participantPreferenceServer: string | null = null
 let participantPreferences = new Map<string, ParticipantPreference>()
@@ -159,7 +161,7 @@ let roomPendingDeletion: string | null = null
 const chat = new RoomChat(sendChatMessage, makeAvatar, () => renderMembers())
 
 const hooks: SessionHooks = {
-  onVoice: (state) => { voiceState = state; syncVoiceUI(); if (!loopbackRequested) showInputLevel(state.inputLevel) },
+  onVoice: (state) => { voiceState = state; syncVoiceUI(); if (!loopbackRequested && settingsDialog.open) showInputLevel(state.inputLevel) },
   onRoomLost: () => chat.clearHistory(),
   onChatMessage: (message) => chat.receive(message),
   onConnection: (state) => {
@@ -190,8 +192,9 @@ const hooks: SessionHooks = {
     if (streamsChanged && ((next.length > 1 && (!selected || selected.local)) || (next.some((stream) => !stream.local) && streams.length === 0))) gridView = true
     streams = next
     if (!next.some((stream) => stream.local)) hideLocalPreview = false
-    for (const id of streamVolumes.keys()) if (!next.some((stream) => stream.id === id)) streamVolumes.delete(id)
-    if (selectedStreamId && !streams.some((stream) => stream.id === selectedStreamId)) selectedStreamId = null
+    // The watched screen ended or its owner left: return to the overview so
+    // every remaining stream stays visible and clickable.
+    if (selectedStreamId && !streams.some((stream) => stream.id === selectedStreamId)) { selectedStreamId = null; gridView = true }
     if (!selectedStreamId && next.some((stream) => stream.local)) selectBestStream()
     renderMembers()
     renderChrome()
@@ -228,8 +231,15 @@ async function boot(): Promise<void> {
   void refreshRooms()
   // Room events keep an open room current instantly. The lobby poll is only a
   // fallback for other rooms and deliberately does not rebuild the video UI
-  // when the response is unchanged.
-  window.setInterval(() => void refreshRooms(true), 5_000)
+  // when the response is unchanged. Inside a room, only other rooms' rail
+  // badges depend on it, so it runs less often to save requests and wake-ups.
+  let lastRoomPoll = 0
+  window.setInterval(() => {
+    const now = Date.now()
+    if (currentRoom && now - lastRoomPoll < 15_000) return
+    lastRoomPoll = now
+    void refreshRooms(true)
+  }, 5_000)
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) void refreshRooms()
   })
@@ -283,7 +293,7 @@ function bind(): void {
   elementById('lobby-settings').addEventListener('click', openSettings)
   elementById('server-settings').addEventListener('click', openServerSettings)
   document.querySelectorAll<HTMLButtonElement>('[data-close]').forEach((button) => button.addEventListener('click', () => byId(button.dataset.close!, HTMLDialogElement).close()))
-  settingsDialog.addEventListener('close', () => { stopMicrophoneTest(); if (savedConfig) { fillForm(savedConfig); void previewVoiceSettings() } })
+  settingsDialog.addEventListener('close', () => { setVoiceInputLevelReporting(false); stopMicrophoneTest(); if (savedConfig) { fillForm(savedConfig); void previewVoiceSettings() } })
   window.addEventListener('pagehide', stopMicrophoneTest)
   serverDialog.addEventListener('close', () => { if (savedConfig) fillForm(savedConfig) })
   deleteDialog.addEventListener('close', () => { roomPendingDeletion = null; clearNote(deleteNote) })
@@ -802,7 +812,9 @@ function renderChrome(): void {
   popOutButton.hidden = !hasVideo || gridView
   const canUseGrid = streams.length > 0 && (participants.length > 1 || (hideLocalPreview && Boolean(localStream)))
   theaterButton.hidden = !hasVideo
-  const useGrid = canUseGrid && (gridView || !hasVideo)
+  // Without a focused stream there is nothing for the stage to show; never
+  // fall through to bare participant tiles while screens are available.
+  const useGrid = canUseGrid && (gridView || !hasVideo || !selectedStreamId)
   popOutButton.hidden = !hasVideo || useGrid
   video.hidden = useGrid || !selectedStreamId
   streamGrid.hidden = !useGrid
@@ -869,7 +881,7 @@ function renderFocusedStreamVolume(useGrid: boolean): void {
   focusedStreamVolume.hidden = !visible
   focusedStreamHideButton.hidden = !visible
   if (!stream) return
-  const value = Math.round((streamVolumes.get(stream.id) ?? 1) * 100)
+  const value = Math.round((streamVolumes.get(stream.participantId) ?? 1) * 100)
   focusedStreamVolumeInput.value = String(value)
   focusedStreamVolumeInput.setAttribute('aria-label', `Volume for ${stream.participantName}`)
   focusedStreamVolumeInput.title = `Volume for ${stream.participantName}: ${value}%`
@@ -884,8 +896,8 @@ function renderFocusedStreamVolume(useGrid: boolean): void {
 function syncFocusedStreamVolume(): void {
   const stream = streams.find((candidate) => candidate.id === selectedStreamId)
   if (!stream || stream.local) return
-  const value = Math.max(0, Math.min(100, Number(focusedStreamVolumeInput.value) || 0)) / 100
-  streamVolumes.set(stream.id, value)
+  const value = Math.max(0, Math.min(200, Number(focusedStreamVolumeInput.value) || 0)) / 100
+  streamVolumes.set(stream.participantId, value)
   focusedStreamVolumeValue.value = `${Math.round(value * 100)}%`
   focusedStreamVolumeValue.textContent = focusedStreamVolumeValue.value
   focusedStreamVolumeInput.title = `Volume for ${stream.participantName}: ${focusedStreamVolumeValue.value}`
@@ -896,7 +908,7 @@ function syncFocusedStreamVolume(): void {
 function renderGrid(active: boolean): void {
   const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
   const visibleParticipants = participants.filter((participant) => !hideLocalPreview || !participant.local)
-  const signature = active ? JSON.stringify({ participants: visibleParticipants, streams: visibleStreams.map((stream) => [stream.id, stream.subscribed, stream.muted, streamVolumes.get(stream.id) ?? 1]) }) : ''
+  const signature = active ? JSON.stringify({ participants: visibleParticipants, streams: visibleStreams.map((stream) => [stream.id, stream.subscribed, stream.muted, streamVolumes.get(stream.participantId) ?? 1]) }) : ''
   if (signature === lastGridSignature) return
   lastGridSignature = signature
   if (!active) {
@@ -943,7 +955,7 @@ function renderGrid(active: boolean): void {
         mute.addEventListener('click', (event) => { event.stopPropagation(); setStreamMuted(stream.id, !stream.muted) })
         audioControls.addEventListener('pointerdown', (event) => event.stopPropagation())
         audioControls.addEventListener('click', (event) => event.stopPropagation())
-        const volume = Object.assign(document.createElement('input'), { type: 'range', className: 'grid-tile-volume', min: '0', max: '100', value: String(Math.round((streamVolumes.get(stream.id) ?? 1) * 100)) })
+        const volume = Object.assign(document.createElement('input'), { type: 'range', className: 'grid-tile-volume', min: '0', max: '200', value: String(Math.round((streamVolumes.get(stream.participantId) ?? 1) * 100)) })
         volume.id = `stream-volume-${stream.id}`
         volume.setAttribute('aria-label', `Volume for ${stream.participantName}`)
         volume.title = `Volume for ${stream.participantName}: ${volume.value}%`
@@ -951,8 +963,8 @@ function renderGrid(active: boolean): void {
         volumeValue.setAttribute('for', volume.id)
         const updateVolume = (event: Event) => {
           event.stopPropagation()
-          const value = Math.max(0, Math.min(100, Number((event.currentTarget as HTMLInputElement).value) || 0)) / 100
-          streamVolumes.set(stream.id, value)
+          const value = Math.max(0, Math.min(200, Number((event.currentTarget as HTMLInputElement).value) || 0)) / 100
+          streamVolumes.set(stream.participantId, value)
           const input = event.currentTarget as HTMLInputElement
           input.title = `Volume for ${stream.participantName}: ${Math.round(value * 100)}%`
           volumeValue.value = `${Math.round(value * 100)}%`
@@ -1545,6 +1557,7 @@ function openSettings(): void {
   clearNote(settingsNote)
   selectSettingsTab('account')
   if (!settingsDialog.open) settingsDialog.showModal()
+  setVoiceInputLevelReporting(true)
   void loadAudioOutputs()
   void loadVoiceInputs()
 }
@@ -1620,7 +1633,17 @@ function setPickerBusy(busy: boolean): void {
   sourcesEl.classList.toggle('is-locked', busy)
   if (!busy) { syncSystemAudioControls(); syncQualityControls() }
 }
-function showNote(note: HTMLParagraphElement, message: string, tone: 'error' | 'warn'): void { note.hidden = false; note.dataset.tone = tone; note.textContent = message }
+function showNote(note: HTMLParagraphElement, message: string, tone: 'error' | 'warn'): void {
+  note.hidden = false; note.dataset.tone = tone; note.textContent = message
+  // Persistent overlays such as connection loss must be closable by the user.
+  if ('dismissible' in note.dataset) {
+    const close = Object.assign(document.createElement('button'), { type: 'button', className: 'note-close' })
+    setButtonIcon(close, 'close')
+    labelButton(close, 'Dismiss')
+    close.addEventListener('click', () => clearNote(note))
+    note.append(close)
+  }
+}
 function clearNote(note: HTMLParagraphElement): void { note.hidden = true; note.textContent = ''; delete note.dataset.tone }
 function messageOf(error: unknown): string { return error instanceof Error && error.message ? error.message : 'Something went wrong' }
 function byId<T extends HTMLElement>(id: string, ctor: new () => T): T { const found = document.getElementById(id); if (!(found instanceof ctor)) throw new Error(`Missing #${id}`); return found }

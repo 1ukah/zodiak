@@ -123,7 +123,7 @@ async function main() {
   assert.equal(await run(`audioSession.test.graph('first').receiverElement.muted && audioSession.test.graph('first').receiverElement.volume === 0`), true, 'Raw WebRTC receiver must not bypass the processed output')
   console.log('PASS Real remote WebRTC audio reaches the production playback output')
 
-  for (const [stream, global, expected] of [[1, 1, 1], [.5, 1, .5], [.01, 1, .01], [1, .01, .01], [.5, .5, .25], [1, 2, 2], [0, 1, 0], [1, 0, 0]]) {
+  for (const [stream, global, expected] of [[1, 1, 1], [.5, 1, .5], [.01, 1, .01], [1, .01, .01], [.5, .5, .25], [1, 2, 4], [2, 1, 4], [1.5, 1, 2.25], [2, .5, 2], [2, 2, 16], [0, 1, 0], [1, 0, 0]]) {
     const amplitude = await run(`audioSession.setStreamVolume(first.id, ${stream}); audioSession.setRemoteAudioVolume(${global}); audioProbe.rms('first')`)
     const ratio = amplitude / baseline
     assert(Math.abs(ratio - expected) < Math.max(0.00001, expected * .12), `Volume ${stream} x ${global}: expected ${expected}, measured ${ratio}`)
