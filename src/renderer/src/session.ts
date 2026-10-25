@@ -15,6 +15,10 @@ import { shareBitrateFor, type SharePriority, type ShareQuality } from '../../sh
 import { closeSystemAudio, openSystemAudioTrack } from './system-audio'
 import { CHAT_MAX_BYTES, CHAT_MAX_LENGTH, CHAT_TOPIC, CHAT_IMAGE_TOPIC, CHAT_IMAGE_BATCH_MAX_BYTES, CHAT_IMAGE_MAX_COUNT, CHAT_IMAGE_PACKET_MAX_BYTES, parseChatPacket, parseChatImagePacket, validateChatImage, type ChatMessage, type ChatPacket, type ChatImage, type ChatImagePacket } from '../../shared/chat'
 import { RoomVoice, type VoiceSettings, type VoiceState } from './voice'
+import { MAX_PLAYBACK_VOLUME, PlaybackGain, playbackGain } from './playback-volume'
+import { installStartBitrateFix } from './start-bitrate'
+
+installStartBitrateFix()
 
 export interface MediaTargets {
   video: HTMLVideoElement
@@ -103,7 +107,7 @@ interface StreamRecord extends ScreenStream {
 interface RemoteAudioGraph {
   receiverElement: HTMLAudioElement
   source: MediaStreamAudioSourceNode
-  gain: GainNode
+  gain: PlaybackGain
   destination: MediaStreamAudioDestinationNode
 }
 
@@ -150,7 +154,24 @@ let lastStats = new Map<string, CounterSample>()
 let telemetryInFlight = false
 let telemetryEnabled = false
 let viewerVisible = true
-export function setViewerVisible(visible: boolean): void { viewerVisible = visible }
+export function setViewerVisible(visible: boolean): void { viewerVisible = visible; voice?.setVisible(visible) }
+let voiceInputLevelReporting = false
+export function setVoiceInputLevelReporting(enabled: boolean): void { voiceInputLevelReporting = enabled; voice?.setInputLevelReporting(enabled) }
+
+/**
+ * Screen audio and voice share one playback context. Each running context
+ * holds its own audio render thread and output stream, even when silent.
+ */
+function playbackContext(): AudioContext {
+  audioContext ??= new AudioContext({ sampleRate: 48000 })
+  return audioContext
+}
+
+function closePlaybackContext(): void {
+  const context = audioContext
+  audioContext = null
+  if (context) void context.close().catch(() => undefined)
+}
 let localScreenTargetBitrate: number | undefined
 let localParticipantName: string | undefined
 const receivedChatIds = new Set<string>()
@@ -197,7 +218,10 @@ export async function joinRoom(args: {
     if (args.voice) {
       voice = new RoomVoice(next, args.media.audioRack, args.voice,
         state => { if (room === next) hooks?.onVoice?.(state) },
-        blocked => { voiceAudioBlocked = blocked; hooks?.onAudioBlocked(screenAudioBlocked || voiceAudioBlocked) })
+        blocked => { voiceAudioBlocked = blocked; hooks?.onAudioBlocked(screenAudioBlocked || voiceAudioBlocked) },
+        playbackContext)
+      voice.setVisible(viewerVisible)
+      voice.setInputLevelReporting(voiceInputLevelReporting)
       await voice.setOutputDevice(remoteAudioOutputDeviceId || 'default')
       voice.setOutputVolume(remoteAudioVolume)
       await voice.setTesting(microphoneTestActive)
@@ -207,6 +231,7 @@ export async function joinRoom(args: {
     room = null
     voice?.close()
     voice = null
+    closePlaybackContext()
     await next.disconnect()
     throw error instanceof Error ? error : new Error('Could not connect')
   }
@@ -421,7 +446,7 @@ export function setStreamMuted(id: string, muted: boolean): void {
 export function setStreamVolume(id: string, volume: number): void {
   const record = streams.get(id)
   if (!record || record.local) return
-  const next = Math.max(0, Math.min(1, volume))
+  const next = Math.max(0, Math.min(MAX_PLAYBACK_VOLUME, volume))
   remoteStreamVolumes.set(record.participantId, next)
   const element = remoteAudio.get(record.participantId)
   if (element) applyAudioVolume(record.participantId, element)
@@ -429,7 +454,7 @@ export function setStreamVolume(id: string, volume: number): void {
 
 /** Applies a single playback level to incoming screen and voice audio. */
 export function setRemoteAudioVolume(volume: number): void {
-  remoteAudioVolume = Math.max(0, Math.min(2, volume))
+  remoteAudioVolume = Math.max(0, Math.min(MAX_PLAYBACK_VOLUME, volume))
   voice?.setOutputVolume(remoteAudioVolume)
   remoteAudio.forEach((element, identity) => applyAudioVolume(identity, element))
 }
@@ -860,7 +885,7 @@ async function attachAudio(track: RemoteTrack, participant: RemoteParticipant): 
   try {
     if (remoteAudioTracks.get(participant.identity) !== track) {
       disconnectRemoteAudioGraph(participant.identity)
-      audioContext ??= new AudioContext()
+      const context = playbackContext()
       // Chromium's MediaElementAudioSource does not intercept WebRTC playback.
       // Process the received track directly, then play ONLY the processed stream
       // through the element so mute and setSinkId still control the audible path.
@@ -871,11 +896,10 @@ async function attachAudio(track: RemoteTrack, participant: RemoteParticipant): 
       receiverElement.muted = true
       receiverElement.volume = 0
       receiverElement.srcObject = stream
-      const source = audioContext.createMediaStreamSource(stream)
-      const gain = audioContext.createGain()
-      const destination = audioContext.createMediaStreamDestination()
-      gain.gain.value = 0
-      source.connect(gain).connect(destination)
+      const source = context.createMediaStreamSource(stream)
+      const destination = context.createMediaStreamDestination()
+      const gain = new PlaybackGain(context, destination)
+      source.connect(gain.node)
       remoteAudioGraphs.set(participant.identity, { receiverElement, source, gain, destination })
       element.srcObject = destination.stream
       remoteAudioTracks.set(participant.identity, track)
@@ -914,10 +938,10 @@ function removeRemoteAudio(identity: string): void {
 }
 
 function applyAudioVolume(identity: string, element: HTMLAudioElement): void {
-  const volume = microphoneTestActive || mutedParticipants.has(identity) ? 0 : remoteAudioVolume * (remoteStreamVolumes.get(identity) ?? 1)
+  const volume = microphoneTestActive || mutedParticipants.has(identity) ? 0 : playbackGain(remoteAudioVolume) * playbackGain(remoteStreamVolumes.get(identity) ?? 1)
   const gain = remoteAudioGraphs.get(identity)?.gain
   if (gain) {
-    gain.gain.value = volume
+    gain.set(volume)
     element.volume = 1
   }
 }
@@ -969,9 +993,7 @@ function clearMedia(): void {
   mutedParticipants.clear()
   hiddenParticipants.clear()
   remoteAudio.forEach((_element, identity) => removeRemoteAudio(identity))
-  const context = audioContext
-  audioContext = null
-  if (context) void context.close().catch(() => undefined)
+  closePlaybackContext()
   remoteStreamVolumes.clear()
   localScreenTargetBitrate = undefined
   localParticipantName = undefined

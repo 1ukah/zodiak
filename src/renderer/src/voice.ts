@@ -2,6 +2,7 @@ import { ConnectionState, Room, RoomEvent, Track, type Participant } from 'livek
 import { MicrophoneProcessor } from './microphone-processor'
 import type { NoiseGateSettings, InputLevel } from './noise-gate'
 import { voiceActiveUntil } from './voice-activity'
+import { MAX_PLAYBACK_VOLUME, PlaybackGain, playbackGain } from './playback-volume'
 
 export interface VoiceParticipant {
   id: string
@@ -29,7 +30,7 @@ interface VoicePlayback {
   element: HTMLAudioElement
   receiver: HTMLAudioElement
   source: MediaStreamAudioSourceNode
-  gain: GainNode
+  gain: PlaybackGain
   destination: MediaStreamAudioDestinationNode
 }
 
@@ -68,12 +69,16 @@ export class RoomVoice {
   private meters = new Map<string, Meter>()
   private localActiveUntil = 0
   private context: AudioContext | null = null
-  private timer: number
+  private timer: number | null = null
+  private visible = true
+  private reportInputLevel = false
   private signature = ''
   private unsubscribe: () => void
 
+  /** `playbackContext` lets the session share one output graph (and audio thread) with screen audio. */
   constructor(private room: Room, private rack: HTMLElement, settings: VoiceSettings,
-    private onState: (state: VoiceState) => void, private onBlocked: (blocked: boolean) => void) {
+    private onState: (state: VoiceState) => void, private onBlocked: (blocked: boolean) => void,
+    private playbackContext?: () => AudioContext) {
     this.enabled = settings.enabled
     this.inputDeviceId = settings.inputDeviceId
     this.inputVolume = Math.max(0, Math.min(1, settings.inputVolume ?? 1))
@@ -83,7 +88,7 @@ export class RoomVoice {
     this.autoGainControl = settings.autoGainControl === true
     this.gateSettings = { noiseGate: settings.noiseGate !== false, autoInputSensitivity: settings.autoInputSensitivity !== false, inputSensitivity: settings.inputSensitivity ?? -50 }
     for (const [id, volume] of Object.entries(settings.participantVolumes ?? {})) {
-      if (Number.isFinite(volume)) this.participantVolumes.set(id, Math.max(0, Math.min(1, volume)))
+      if (Number.isFinite(volume)) this.participantVolumes.set(id, Math.max(0, Math.min(MAX_PLAYBACK_VOLUME, volume)))
     }
     const sync = () => this.sync()
     const reconnect = () => { void this.run(() => this.reconcile()).catch(() => { this.muted = true; this.emit() }) }
@@ -101,10 +106,34 @@ export class RoomVoice {
         .off(RoomEvent.ParticipantConnected, sync).off(RoomEvent.ParticipantDisconnected, sync)
         .off(RoomEvent.ParticipantAttributesChanged, sync).off(RoomEvent.Reconnected, reconnect)
     }
-    this.timer = window.setInterval(() => this.emit(), 80)
+    this.startMeters()
   }
 
   async start(): Promise<void> { await this.run(() => this.reconcile()) }
+
+  /** Speaking indicators are not visible while minimized; stop polling the analysers. */
+  setVisible(visible: boolean): void {
+    if (this.visible === visible || this.closed) return
+    this.visible = visible
+    if (visible) { this.startMeters(); this.emit() }
+    else this.stopMeters()
+  }
+
+  /** The live input level is only shown in settings; omit it otherwise so it cannot re-render the room UI. */
+  setInputLevelReporting(enabled: boolean): void {
+    if (this.reportInputLevel === enabled) return
+    this.reportInputLevel = enabled
+    this.emit()
+  }
+
+  private startMeters(): void {
+    if (this.timer === null && this.visible) this.timer = window.setInterval(() => this.emit(), 80)
+  }
+
+  private stopMeters(): void {
+    if (this.timer !== null) window.clearInterval(this.timer)
+    this.timer = null
+  }
 
   async configure(settings: VoiceSettings): Promise<void> {
     for (const key of ['noiseGate', 'autoInputSensitivity', 'inputSensitivity'] as const) {
@@ -180,14 +209,14 @@ export class RoomVoice {
 
   setParticipantVolume(id: string, volume: number): void {
     if (!Number.isFinite(volume) || !this.room.remoteParticipants.has(id)) return
-    this.participantVolumes.set(id, Math.max(0, Math.min(1, volume)))
+    this.participantVolumes.set(id, Math.max(0, Math.min(MAX_PLAYBACK_VOLUME, volume)))
     const entry = this.audio.get(id)
-    if (entry) entry.gain.gain.value = this.playbackVolume(id)
+    if (entry) entry.gain.set(this.playbackVolume(id))
     this.emit()
   }
 
   private playbackVolume(id: string): number {
-    return this.mutedIds.has(id) ? 0 : this.outputVolume * (this.participantVolumes.get(id) ?? 1)
+    return this.mutedIds.has(id) ? 0 : playbackGain(this.outputVolume) * playbackGain(this.participantVolumes.get(id) ?? 1)
   }
 
   /** Suspend room voice without changing the user's mute preferences. */
@@ -208,8 +237,8 @@ export class RoomVoice {
 
   setOutputVolume(volume: number): void {
     if (!Number.isFinite(volume)) return
-    this.outputVolume = Math.max(0, Math.min(2, volume))
-    for (const [id, entry] of this.audio) entry.gain.gain.value = this.playbackVolume(id)
+    this.outputVolume = Math.max(0, Math.min(MAX_PLAYBACK_VOLUME, volume))
+    for (const [id, entry] of this.audio) entry.gain.set(this.playbackVolume(id))
     this.emit()
   }
 
@@ -235,11 +264,12 @@ export class RoomVoice {
     this.closed = true
     this.silenceMicrophone()
     this.microphone()?.track?.stop()
-    window.clearInterval(this.timer)
+    this.stopMeters()
     this.unsubscribe()
     for (const id of this.audio.keys()) this.removeAudio(id)
     for (const id of this.meters.keys()) this.removeMeter(id)
-    if (this.context) void this.context.close().catch(() => undefined)
+    // A shared playback context belongs to the session, which closes it.
+    if (this.context && !this.playbackContext) void this.context.close().catch(() => undefined)
     if (this.inputContext) void this.inputContext.close().catch(() => undefined)
     this.inputContext = null
     this.context = null
@@ -372,12 +402,12 @@ export class RoomVoice {
       // LiveKit's attach() unmutes audio elements and can create its own output
       // graph. Assign the stream directly so only the processed element is heard.
       receiver.srcObject = stream
-      this.context ??= new AudioContext({ sampleRate: 48000 })
+      this.context ??= this.playbackContext?.() ?? new AudioContext({ sampleRate: 48000 })
       const source = this.context.createMediaStreamSource(stream)
-      const gain = this.context.createGain()
-      gain.gain.value = this.playbackVolume(id)
       const destination = this.context.createMediaStreamDestination()
-      source.connect(gain).connect(destination)
+      const gain = new PlaybackGain(this.context, destination)
+      gain.set(this.playbackVolume(id))
+      source.connect(gain.node)
       element.srcObject = destination.stream
       this.rack.append(element)
       entry = { track, element, receiver, source, gain, destination }
@@ -385,7 +415,7 @@ export class RoomVoice {
       void this.play(id, entry)
     }
     entry.element.muted = this.mutedIds.has(id)
-    entry.gain.gain.value = this.playbackVolume(id)
+    entry.gain.set(this.playbackVolume(id))
   }
 
   private async play(id: string, entry: VoicePlayback): Promise<void> {
@@ -413,7 +443,7 @@ export class RoomVoice {
   }
 
   private addMeter(id: string, track: Track): void {
-    const source = this.audio.get(id)?.gain
+    const source = this.audio.get(id)?.gain.node
     if (!source) return
     const previous = this.meters.get(id)
     if (previous?.track === track && previous.mediaTrack === track.mediaStreamTrack && previous.source === source) return
@@ -470,7 +500,7 @@ export class RoomVoice {
     const state: VoiceState = {
       enabled: this.enabled, muted: this.muted || this.deafened || this.testing || !this.enabled || !this.microphone() || this.microphone()!.isMuted,
       deafened: this.deafened || this.testing, busy: this.pending > 0,
-      inputLevel: this.muted || this.deafened || this.testing ? undefined : this.inputGain?.inputLevel,
+      inputLevel: !this.reportInputLevel || this.muted || this.deafened || this.testing ? undefined : this.inputGain?.inputLevel,
       participants: [this.participantState(this.room.localParticipant, true),
         ...[...this.room.remoteParticipants.values()].map(participant => this.participantState(participant, false))],
     }
