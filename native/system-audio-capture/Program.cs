@@ -43,6 +43,9 @@ static class Program {
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern bool Process32FirstW(IntPtr snapshot,ref ProcessEntry entry);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern bool Process32NextW(IntPtr snapshot,ref ProcessEntry entry);
   [DllImport("winmm.dll")] static extern uint timeBeginPeriod(uint period);
+  [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access,bool inherit,uint pid);
+  [DllImport("kernel32.dll")] static extern bool GetProcessTimes(IntPtr process,out long created,out long exited,out long kernel,out long user);
+  static readonly Dictionary<uint,long> Starts=new();
   [MTAThread] static int Main(string[] args) { CoInitializeEx(IntPtr.Zero,0); try { if(args.Length is <1 or >2||!uint.TryParse(args[0],out var pid)||pid==0||(args.Length==2&&args[1]!="discord"))return Fail("A Zodiak process ID is required."); if(args.Length==2)return Mix(pid); var client=ActivateLoopback(pid,1); if(client==null)return Fail("Windows process-loopback exclusion is unavailable."); if(Prepare(client,out var capture,out var signal)<0)return Fail("Could not initialize protected system-audio capture."); Console.Error.WriteLine($"ready exclude {pid}"); Console.Error.Flush(); if(client.Start()<0)return Fail("Could not start protected system-audio capture."); return Pump(capture,signal); }catch(Exception e){return Fail(e.Message);} }
   static int Fail(string text){Console.Error.WriteLine("error "+text);return 1;}
   static int Mix(uint self){
@@ -62,7 +65,7 @@ static class Program {
     }
   }
   static void Refresh(uint self,Dictionary<uint,Source> sources){
-    var all=Processes();var roots=all.Where(p=>p.Value.name!=null&&p.Value.name.StartsWith("Discord",StringComparison.OrdinalIgnoreCase)).Select(p=>p.Key).Append(self).ToList();
+    var all=Processes();Starts.Clear();var roots=all.Where(p=>p.Value.name!=null&&p.Value.name.StartsWith("Discord",StringComparison.OrdinalIgnoreCase)).Select(p=>p.Key).Append(self).ToList();
     Failed.RemoveWhere(pid=>!all.ContainsKey(pid));
     foreach(var pid in sources.Keys.ToList())if(!all.ContainsKey(pid)||roots.Any(r=>Related(pid,r,all)))Remove(sources,pid);
     foreach(var pid in SessionPids()){
@@ -72,7 +75,11 @@ static class Program {
   }
   static void Remove(Dictionary<uint,Source> sources,uint pid){var s=sources[pid];sources.Remove(pid);try{s.Client.Stop();}catch{}CloseHandle(s.Signal);}
   static bool Related(uint a,uint b,Dictionary<uint,(uint parent,string name)> all)=>Under(a,b,all)||Under(b,a,all);
-  static bool Under(uint pid,uint root,Dictionary<uint,(uint parent,string name)> all){for(var depth=0;depth<64;depth++){if(pid==root)return true;if(pid==0||!all.TryGetValue(pid,out var p)||p.parent==pid)return false;pid=p.parent;}return false;}
+  // Windows reuses the IDs of exited processes, so a recorded parent ID can name an unrelated newer process
+  // (zodiak relaunched by the exited installer, Discord started by its exited updater). Without this check
+  // that process counts as an ancestor of zodiak or Discord and its audio is silently dropped.
+  static bool Under(uint pid,uint root,Dictionary<uint,(uint parent,string name)> all){for(var depth=0;depth<64;depth++){if(pid==root)return true;if(pid==0||!all.TryGetValue(pid,out var p)||p.parent==pid)return false;var child=Started(pid);var parent=Started(p.parent);if(child!=0&&parent!=0&&parent>child)return false;pid=p.parent;}return false;}
+  static long Started(uint pid){if(Starts.TryGetValue(pid,out var start))return start;var handle=OpenProcess(0x1000,false,pid);if(handle!=IntPtr.Zero){if(!GetProcessTimes(handle,out start,out _,out _,out _))start=0;CloseHandle(handle);}return Starts[pid]=start;}
   static Dictionary<uint,(uint parent,string name)> Processes(){var all=new Dictionary<uint,(uint parent,string name)>();var snapshot=CreateToolhelp32Snapshot(2,0);if(snapshot==new IntPtr(-1))return all;try{var e=new ProcessEntry{size=(uint)Marshal.SizeOf<ProcessEntry>(),name=""};for(var ok=Process32FirstW(snapshot,ref e);ok;ok=Process32NextW(snapshot,ref e))all[e.pid]=(e.parent,e.name);}finally{CloseHandle(snapshot);}return all;}
   static HashSet<uint> SessionPids(){
     var pids=new HashSet<uint>();var iid=typeof(ISessionManager).GUID;

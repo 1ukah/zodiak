@@ -648,6 +648,8 @@ async function toggleFullscreen(): Promise<void> {
 }
 
 function syncFullscreenLabel(): void {
+  // Fullscreen hides the app title bar too, leaving only the stream.
+  document.body.classList.toggle('window-fullscreen', windowFullscreen)
   for (const button of [fullscreenButton, fullscreenFocusButton]) {
     labelButton(button, windowFullscreen ? 'Exit fullscreen' : 'Fullscreen')
     button.innerHTML = icon(windowFullscreen ? 'collapse' : 'expand')
