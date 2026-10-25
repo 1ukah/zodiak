@@ -76,6 +76,7 @@ export function setStreamMuted(id, muted) { state.emitStreams(streams.map(s => s
 export function supportsRemoteAudioOutputSelection() { return true }
 export function setTelemetryEnabled() {}
 export function setViewerVisible() {}
+export function setVoiceInputLevelReporting() {}
 export async function sendChatMessage(text, recipient, images = []) {
   if (state.failChat) throw new Error('Test send failed')
   const message = { version: 1, id: crypto.randomUUID(), text, timestamp: Date.now(), senderId: 'me', senderName: 'Alex Morgan', local: true, ...(recipient ? { recipient } : {}), ...(images.length ? { images: images.map(image => ({ name: image.name, mimeType: image.type, size: image.size, blob: image })) } : {}) }

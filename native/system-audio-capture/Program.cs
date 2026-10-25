@@ -49,7 +49,8 @@ static class Program {
     timeBeginPeriod(1);var sources=new Dictionary<uint,Source>();Console.Error.WriteLine($"ready mix {self}");Console.Error.Flush();
     var output=Console.OpenStandardOutput();var clock=Stopwatch.StartNew();long written=0,scanned=0;var read=Array.Empty<short>();var sum=Array.Empty<int>();var bytes=Array.Empty<byte>();var dead=new List<uint>();
     while(true){
-      Thread.Sleep(5);
+      // WASAPI delivers 10 ms packets; waking at that rate halves wake-ups and pipe/IPC writes versus 5 ms.
+      Thread.Sleep(10);
       if(scanned==0||clock.ElapsedMilliseconds-scanned>=1000){scanned=clock.ElapsedMilliseconds;try{Refresh(self,sources);}catch{}}
       foreach(var (pid,s) in sources){try{while(true){s.Capture.GetNextPacketSize(out var next);if(next==0)break;s.Capture.GetBuffer(out var data,out var frames,out var flags,out _,out _);var count=checked((int)frames*2);if(read.Length<count)read=new short[count];if((flags&Silent)!=0||data==IntPtr.Zero)Array.Clear(read,0,count);else Marshal.Copy(data,read,0,count);s.Capture.ReleaseBuffer(frames);s.Queue.AddRange(new ArraySegment<short>(read,0,count));}}catch{dead.Add(pid);}}
       foreach(var pid in dead)Remove(sources,pid);dead.Clear();

@@ -68,6 +68,8 @@ function toInfo(source: DesktopCapturerSource): DesktopSourceInfo {
   return {
     id: source.id,
     name: source.name || 'Window',
-    thumbnail: source.thumbnail.isEmpty() ? '' : source.thumbnail.toDataURL(),
+    // JPEG encodes several times faster than PNG on the main thread and keeps
+    // the IPC payload small when many windows are open.
+    thumbnail: source.thumbnail.isEmpty() ? '' : `data:image/jpeg;base64,${source.thumbnail.toJPEG(80).toString('base64')}`,
   }
 }

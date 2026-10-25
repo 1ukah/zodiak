@@ -4,6 +4,8 @@ import { readLocalData, writeLocalData } from './local-data'
 import { isRecord } from './parse'
 
 type Preferences = Record<string, Record<string, ParticipantPreference>>
+// Matches the renderer's 0–200% playback sliders.
+const MAX_PARTICIPANT_VOLUME = 2
 let writes: Promise<unknown> = Promise.resolve()
 
 function serverKey(value: unknown): string {
@@ -35,7 +37,7 @@ async function readPreferences(): Promise<Preferences> {
       try {
         participantId(id)
         const name = participantName(person.name)
-        const volume = typeof person.volume === 'number' && Number.isFinite(person.volume) ? Math.max(0, Math.min(1, person.volume)) : 1
+        const volume = typeof person.volume === 'number' && Number.isFinite(person.volume) ? Math.max(0, Math.min(MAX_PARTICIPANT_VOLUME, person.volume)) : 1
         preferences[id] = { name, volume }
       } catch { /* Ignore an invalid entry without losing other participants. */ }
     }
@@ -57,7 +59,7 @@ export function saveParticipantPreferences(value: unknown): Promise<void> {
     const id = participantId(person.id)
     const name = participantName(person.name)
     if (person.volume !== undefined && (typeof person.volume !== 'number' || !Number.isFinite(person.volume))) throw new Error('Invalid participant volume')
-    return { id, name, ...(typeof person.volume === 'number' ? { volume: Math.max(0, Math.min(1, person.volume)) } : {}) }
+    return { id, name, ...(typeof person.volume === 'number' ? { volume: Math.max(0, Math.min(MAX_PARTICIPANT_VOLUME, person.volume)) } : {}) }
   })
   const result = writes.then(async () => {
     const servers = await readPreferences()
