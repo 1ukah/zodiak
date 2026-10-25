@@ -1704,6 +1704,12 @@ body.theater #shell {
 body.theater #shell {
   height: calc(100% - 32px);
 }
+body.window-fullscreen .app-titlebar {
+  display: none;
+}
+body.window-fullscreen #shell {
+  height: 100%;
+}
 /* Fit the call grid to the available stage;
 extra participants scroll naturally. */
 #participant-grid {
