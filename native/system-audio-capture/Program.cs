@@ -34,6 +34,8 @@ static class Program {
   const uint Loopback=0x80060000, Silent=2;
   const int Cushion=2880;
   static readonly HashSet<uint> Failed=new();
+  // Launch fallback never climbs to these: their trees hold the whole desktop, including Discord and zodiak.
+  static readonly HashSet<string> Shell=new(StringComparer.OrdinalIgnoreCase){"explorer.exe","sihost.exe","userinit.exe","winlogon.exe","wininit.exe","services.exe","svchost.exe","System"};
   [DllImport("ole32.dll")] static extern int CoInitializeEx(IntPtr reserved,uint mode);
   [DllImport("mmdevapi.dll",ExactSpelling=true)] static extern int ActivateAudioInterfaceAsync([MarshalAs(UnmanagedType.LPWStr)]string path,ref Guid iid,IntPtr parameters,ICompletion handler,out IActivationOperation operation);
   [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr CreateEvent(IntPtr attributes,bool manual,bool state,IntPtr name);
@@ -69,16 +71,29 @@ static class Program {
     Failed.RemoveWhere(pid=>!all.ContainsKey(pid));
     foreach(var pid in sources.Keys.ToList())if(!all.ContainsKey(pid)||roots.Any(r=>Related(pid,r,all)))Remove(sources,pid);
     foreach(var pid in SessionPids()){
-      if(sources.ContainsKey(pid)||Failed.Contains(pid)||!all.ContainsKey(pid)||roots.Any(r=>Related(pid,r,all))||sources.Keys.Any(c=>Related(pid,c,all)))continue;
-      try{var client=ActivateLoopback(pid,0);if(client==null||Prepare(client,out var capture,out var signal,2_000_000)<0||client.Start()<0){Failed.Add(pid);continue;}sources[pid]=new Source{Client=client,Capture=capture,Signal=signal};}catch{Failed.Add(pid);}
+      if(sources.ContainsKey(pid)||!all.ContainsKey(pid)||roots.Any(r=>Related(pid,r,all))||sources.Keys.Any(c=>Related(pid,c,all)))continue;
+      if(!Failed.Contains(pid)&&Add(pid,sources))continue;
+      Failed.Add(pid);
+      // Anti-cheat drivers (Ricochet, Arena Breakout's ACE) can block process loopback on the game itself. Capture the
+      // nearest launcher instead (Battle.net, Steam, ...): its tree includes the game. Stop at the first ancestor of
+      // Discord or zodiak, since every launcher above it would capture them too.
+      for(uint up=pid,depth=0;depth<4&&all.TryGetValue(up,out var p)&&all.TryGetValue(p.parent,out var launcher)&&p.parent!=up&&IsParent(up,p.parent)&&!Shell.Contains(launcher.name??"");depth++){
+        up=p.parent;
+        if(roots.Any(r=>Related(up,r,all)))break;
+        if(Failed.Contains(up))continue;
+        if(Add(up,sources))break;
+        Failed.Add(up);
+      }
     }
   }
+  static bool Add(uint pid,Dictionary<uint,Source> sources){try{var client=ActivateLoopback(pid,0);if(client==null||Prepare(client,out var capture,out var signal,2_000_000)<0||client.Start()<0)return false;sources[pid]=new Source{Client=client,Capture=capture,Signal=signal};return true;}catch{return false;}}
   static void Remove(Dictionary<uint,Source> sources,uint pid){var s=sources[pid];sources.Remove(pid);try{s.Client.Stop();}catch{}CloseHandle(s.Signal);}
   static bool Related(uint a,uint b,Dictionary<uint,(uint parent,string name)> all)=>Under(a,b,all)||Under(b,a,all);
   // Windows reuses the IDs of exited processes, so a recorded parent ID can name an unrelated newer process
   // (zodiak relaunched by the exited installer, Discord started by its exited updater). Without this check
   // that process counts as an ancestor of zodiak or Discord and its audio is silently dropped.
-  static bool Under(uint pid,uint root,Dictionary<uint,(uint parent,string name)> all){for(var depth=0;depth<64;depth++){if(pid==root)return true;if(pid==0||!all.TryGetValue(pid,out var p)||p.parent==pid)return false;var child=Started(pid);var parent=Started(p.parent);if(child!=0&&parent!=0&&parent>child)return false;pid=p.parent;}return false;}
+  static bool Under(uint pid,uint root,Dictionary<uint,(uint parent,string name)> all){for(var depth=0;depth<64;depth++){if(pid==root)return true;if(pid==0||!all.TryGetValue(pid,out var p)||p.parent==pid||!IsParent(pid,p.parent))return false;pid=p.parent;}return false;}
+  static bool IsParent(uint child,uint parent){var c=Started(child);var p=Started(parent);return c==0||p==0||p<=c;}
   static long Started(uint pid){if(Starts.TryGetValue(pid,out var start))return start;var handle=OpenProcess(0x1000,false,pid);if(handle!=IntPtr.Zero){if(!GetProcessTimes(handle,out start,out _,out _,out _))start=0;CloseHandle(handle);}return Starts[pid]=start;}
   static Dictionary<uint,(uint parent,string name)> Processes(){var all=new Dictionary<uint,(uint parent,string name)>();var snapshot=CreateToolhelp32Snapshot(2,0);if(snapshot==new IntPtr(-1))return all;try{var e=new ProcessEntry{size=(uint)Marshal.SizeOf<ProcessEntry>(),name=""};for(var ok=Process32FirstW(snapshot,ref e);ok;ok=Process32NextW(snapshot,ref e))all[e.pid]=(e.parent,e.name);}finally{CloseHandle(snapshot);}return all;}
   static HashSet<uint> SessionPids(){
