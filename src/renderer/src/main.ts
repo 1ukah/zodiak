@@ -85,7 +85,9 @@ const audioVolumeValue = byId('audio-volume-value', HTMLOutputElement)
 const audioOutputNote = byId('audio-output-note', HTMLParagraphElement)
 const showStreamStatisticsInput = byId('show-stream-statistics', HTMLInputElement)
 const checkForUpdatesOnStartupInput = byId('check-for-updates-on-startup', HTMLInputElement)
-const updateChannelInput = byId('update-channel', HTMLSelectElement)
+// Beta is paused; every build follows Stable.
+// const updateChannelInput = byId('update-channel', HTMLSelectElement)
+const hardwareAccelerationInput = byId('hardware-acceleration', HTMLInputElement)
 const showChatBubblesInput = byId('show-chat-bubbles', HTMLInputElement)
 const voiceEnabledInput = byId('voice-enabled', HTMLInputElement)
 const noiseSuppressionInput = byId('voice-noise-suppression', HTMLInputElement)
@@ -332,7 +334,7 @@ function bind(): void {
     button.disabled = true
     try {
       clearNote(settingsNote)
-      const result = await window.sharescreen.checkForUpdates(updateChannelInput.value === 'beta' ? 'beta' : 'stable')
+      const result = await window.sharescreen.checkForUpdates('stable') // updateChannelInput.value === 'beta' ? 'beta' : 'stable'
       if (!result.ok) showNote(settingsNote, result.error, 'error')
     } finally { button.disabled = false }
   })
@@ -1524,14 +1526,15 @@ async function persistConfig(): Promise<AppConfig | null> {
     fillForm(saved.value); return saved.value
   } catch (error) { openServerSettings(); showNote(serverNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: updateChannelInput.value === 'beta' ? 'beta' : 'stable', showChatBubbles: showChatBubblesInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100, voiceEchoCancellation: echoCancellationInput.checked, voiceAutoGainControl: autoGainControlInput.checked, voiceNoiseGate: noiseGateInput.checked, voiceAutoInputSensitivity: autoSensitivityInput.checked, voiceInputSensitivity: Number(sensitivityInput.value) } }
+function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: 'stable', hardwareAcceleration: hardwareAccelerationInput.checked, showChatBubbles: showChatBubblesInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100, voiceEchoCancellation: echoCancellationInput.checked, voiceAutoGainControl: autoGainControlInput.checked, voiceNoiseGate: noiseGateInput.checked, voiceAutoInputSensitivity: autoSensitivityInput.checked, voiceInputSensitivity: Number(sensitivityInput.value) } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
   urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
   showStatistics = config.showStreamStatistics
   setTelemetryEnabled(showStatistics)
   checkForUpdatesOnStartupInput.checked = config.checkForUpdatesOnStartup
-  updateChannelInput.value = config.updateChannel === 'beta' ? 'beta' : 'stable'
+  // updateChannelInput.value = config.updateChannel === 'beta' ? 'beta' : 'stable'
+  hardwareAccelerationInput.checked = config.hardwareAcceleration !== false
   showStreamStatisticsInput.checked = showStatistics
   showChatBubblesInput.checked = config.showChatBubbles === true
   voiceEnabledInput.checked = config.voiceEnabled !== false

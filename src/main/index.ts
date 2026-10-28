@@ -4,15 +4,15 @@ import { join } from 'node:path'
 import { channels, shareBitrateRangeFor, supportsShareQuality, type CaptureAccelerationStatus, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareResolution, type ShareStartRequest } from '../shared/types'
 import { armCapture, listSources, registerCaptureHandler } from './capture'
 import { startSystemAudio, stopSystemAudio } from './system-audio'
-import { loadConfig, saveConfig } from './config'
+import { hardwareAccelerationEnabledSync, loadConfig, saveConfig } from './config'
 import { isRecord } from './parse'
 import { settle } from './result'
 import { getLocalIdentity } from './identity'
 import { flushParticipantPreferences, getParticipantPreferences, saveParticipantPreferences } from './participant-preferences'
 
-// Electron enables Chromium's GPU pipeline by default. This app deliberately
-// never calls disableHardwareAcceleration; the renderer also reports Chromium's
-// video_encode feature state before a share begins.
+// Electron enables Chromium's GPU pipeline by default. Users can turn it off in
+// Settings > System (applied below, after userData is resolved); the renderer
+// reports Chromium's video_encode feature state in the stream statistics.
 app.setName('zodiak')
 if (process.platform === 'win32') app.setAppUserModelId('app.zodiak')
 // Playing <video> elements otherwise register a Windows media session, so
@@ -31,6 +31,15 @@ if (app.isPackaged) {
   app.setPath('sessionData', join(dataDirectory, 'session'))
   app.setPath('logs', join(dataDirectory, 'logs'))
   app.setPath('crashDumps', join(dataDirectory, 'crash-dumps'))
+}
+
+// With hardware acceleration off, rendering and WebRTC video encode/decode all
+// run on the CPU, so a saturated low-end GPU cannot stall the stream.
+const hardwareAcceleration = hardwareAccelerationEnabledSync()
+if (!hardwareAcceleration) {
+  app.disableHardwareAcceleration()
+  app.commandLine.appendSwitch('disable-accelerated-video-encode')
+  app.commandLine.appendSwitch('disable-accelerated-video-decode')
 }
 
 let sleepBlocker: number | null = null
@@ -298,17 +307,36 @@ function captureAccelerationStatus(): CaptureAccelerationStatus {
   }
 }
 
+async function promptRestartForHardwareAcceleration(win: BrowserWindow | null, enabled: boolean): Promise<void> {
+  const options: Electron.MessageBoxOptions = {
+    type: 'question',
+    title: 'Restart required',
+    message: `Hardware acceleration will be ${enabled ? 'enabled' : 'disabled'} after zodiak restarts.`,
+    detail: 'Restarting ends any stream or voice chat in progress.',
+    buttons: ['Restart now', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+  }
+  const { response } = win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
+  if (response !== 0) return
+  app.relaunch()
+  app.quit()
+}
+
 function registerIpc(): void {
   ipcMain.handle(channels.getConfig, async () => { await getLocalIdentity(); return loadConfig() })
   ipcMain.handle(channels.getParticipantPreferences, (_event, server: unknown) => settle(() => getParticipantPreferences(server)))
   ipcMain.handle(channels.saveParticipantPreferences, (_event, payload: unknown) => settle(async () => { await saveParticipantPreferences(payload); return true as const }))
-  ipcMain.handle(channels.saveConfig, (_event, payload: unknown) => settle(async () => {
+  ipcMain.handle(channels.saveConfig, (event, payload: unknown) => settle(async () => {
     const previous = await loadConfig()
     const saved = await saveConfig(payload)
     if (app.isPackaged && saved.updateChannel !== previous.updateChannel) {
       // Saving stays independent of network failures or a pending update prompt.
       void loadUpdater().then(updater => updater.requestUpdateCheck(true, saved.updateChannel))
         .catch(error => console.warn('Could not check the selected update channel:', error))
+    }
+    if (saved.hardwareAcceleration !== hardwareAcceleration && saved.hardwareAcceleration !== previous.hardwareAcceleration) {
+      void promptRestartForHardwareAcceleration(BrowserWindow.fromWebContents(event.sender), saved.hardwareAcceleration)
     }
     return saved
   }))

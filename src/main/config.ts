@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { readFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AppConfig, UpdateChannel } from '../shared/types'
@@ -14,6 +15,7 @@ const DEFAULT_CONFIG: AppConfig = {
   showStreamStatistics: false,
   checkForUpdatesOnStartup: true,
   updateChannel: 'stable',
+  hardwareAcceleration: true,
   showChatBubbles: false,
   voiceEnabled: true,
   voiceInputDeviceId: 'default',
@@ -118,7 +120,10 @@ export function validateConfig(value: unknown): AppConfig {
     displayName: optionalDisplayName(value.displayName),
     showStreamStatistics: value.showStreamStatistics === true,
     checkForUpdatesOnStartup: value.checkForUpdatesOnStartup !== false,
-    updateChannel: requireUpdateChannel(value.updateChannel),
+    // Beta is paused; every build follows Stable. Restore to re-enable Beta:
+    // updateChannel: requireUpdateChannel(value.updateChannel),
+    updateChannel: 'stable',
+    hardwareAcceleration: value.hardwareAcceleration !== false,
     showChatBubbles: value.showChatBubbles === true,
     voiceEnabled: value.voiceEnabled !== false,
     voiceInputDeviceId: stringOr(value.voiceInputDeviceId, 'default').slice(0, 512) || 'default',
@@ -151,7 +156,10 @@ function normalizeStored(value: unknown): AppConfig {
     displayName: stringOr(record.displayName, '').trim(),
     showStreamStatistics: record.showStreamStatistics === true,
     checkForUpdatesOnStartup: record.checkForUpdatesOnStartup !== false,
-    updateChannel: record.updateChannel === 'beta' ? 'beta' : 'stable',
+    // Beta is paused, so a previously saved Beta choice moves back to Stable.
+    // updateChannel: record.updateChannel === 'beta' ? 'beta' : 'stable',
+    updateChannel: 'stable',
+    hardwareAcceleration: record.hardwareAcceleration !== false,
     showChatBubbles: record.showChatBubbles === true,
     voiceEnabled: record.voiceEnabled !== false,
     voiceInputDeviceId: stringOr(record.voiceInputDeviceId, 'default').slice(0, 512) || 'default',
@@ -163,6 +171,19 @@ function normalizeStored(value: unknown): AppConfig {
     voiceNoiseGate: record.voiceNoiseGate !== false,
     voiceAutoInputSensitivity: record.voiceAutoInputSensitivity !== false,
     voiceInputSensitivity: inputSensitivity(record.voiceInputSensitivity),
+  }
+}
+
+/**
+ * Chromium's GPU mode must be chosen before the app is ready, so this reads the
+ * saved preference synchronously. Any read failure keeps the default (enabled).
+ */
+export function hardwareAccelerationEnabledSync(): boolean {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(configPath(), 'utf8'))
+    return !isRecord(parsed) || parsed.hardwareAcceleration !== false
+  } catch {
+    return true
   }
 }
 

@@ -110,9 +110,16 @@
             <label class="check" for="show-chat-bubbles"><span>Show chat bubbles</span><input id="show-chat-bubbles" type="checkbox" role="switch" title="Preview messages while chat is hidden" /></label>
           </section>
           <section id="settings-panel-system" role="tabpanel" aria-labelledby="settings-tab-system" tabindex="0" hidden>
+            <!-- Beta is paused; every build follows Stable. Restore with the #update-channel code in main.ts.
             <label class="field" for="update-channel">Update channel<select id="update-channel"><option value="stable">Stable</option><option value="beta">Beta</option></select></label>
+            -->
             <label class="check" for="check-for-updates-on-startup"><span>Check for updates on startup</span><input id="check-for-updates-on-startup" type="checkbox" role="switch" title="Check GitHub Releases for a newer zodiak version when the app opens" /></label>
             <button id="check-for-updates" class="update-check-button" type="button" title="Check for updates now">Check for updates now</button>
+            <hr class="settings-separator" />
+            <div class="settings-option">
+              <label class="check" for="hardware-acceleration"><span>Hardware acceleration</span><input id="hardware-acceleration" type="checkbox" role="switch" checked aria-describedby="hardware-acceleration-help" title="Use the GPU for rendering and stream encoding" /></label>
+              <p id="hardware-acceleration-help" class="quality-note">Uses your GPU to encode and display streams. Turn it off if your GPU is overloaded and streams stutter; the CPU is used instead. Applies after zodiak restarts.</p>
+            </div>
           </section>
         </div>
         <footer class="settings-footer"><p id="settings-note" class="note" role="alert" hidden></p><button id="save-settings" class="primary icon-action" title="Save" aria-label="Save settings"><span data-icon="check"></span></button></footer>
