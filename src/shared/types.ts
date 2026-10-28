@@ -21,6 +21,8 @@ export interface AppConfig {
   showStreamStatistics: boolean
   checkForUpdatesOnStartup: boolean
   updateChannel: UpdateChannel
+  /** Uses the GPU for rendering and video encode/decode; off forces CPU. Applies after a restart. */
+  hardwareAcceleration: boolean
   showChatBubbles: boolean
   voiceEnabled: boolean
   voiceInputDeviceId: string
