@@ -307,22 +307,6 @@ function captureAccelerationStatus(): CaptureAccelerationStatus {
   }
 }
 
-async function promptRestartForHardwareAcceleration(win: BrowserWindow | null, enabled: boolean): Promise<void> {
-  const options: Electron.MessageBoxOptions = {
-    type: 'question',
-    title: 'Restart required',
-    message: `Hardware acceleration will be ${enabled ? 'enabled' : 'disabled'} after zodiak restarts.`,
-    detail: 'Restarting ends any stream or voice chat in progress.',
-    buttons: ['Restart now', 'Later'],
-    defaultId: 0,
-    cancelId: 1,
-  }
-  const { response } = win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
-  if (response !== 0) return
-  app.relaunch()
-  app.quit()
-}
-
 function registerIpc(): void {
   ipcMain.handle(channels.getConfig, async () => { await getLocalIdentity(); return loadConfig() })
   ipcMain.handle(channels.getParticipantPreferences, (_event, server: unknown) => settle(() => getParticipantPreferences(server)))
@@ -336,10 +320,11 @@ function registerIpc(): void {
         .catch(error => console.warn('Could not check the selected update channel:', error))
     }
     if (saved.hardwareAcceleration !== hardwareAcceleration && saved.hardwareAcceleration !== previous.hardwareAcceleration) {
-      void promptRestartForHardwareAcceleration(BrowserWindow.fromWebContents(event.sender), saved.hardwareAcceleration)
+      if (!event.sender.isDestroyed()) event.sender.send(channels.restartRequired, saved.hardwareAcceleration)
     }
     return saved
   }))
+  ipcMain.handle(channels.relaunchApp, () => { app.relaunch(); app.quit() })
   ipcMain.handle(channels.checkForUpdates, (_event, channel: unknown) => settle(async () => {
     await (await loadUpdater()).requestUpdateCheck(true, channel)
     return true as const
