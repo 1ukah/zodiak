@@ -3,11 +3,16 @@ let config = { url: 'ws://localhost:7880', apiKey: 'test', apiSecret: 'test', di
 let rooms = [{ name: 'the-lounge', participants: 3, sharing: false }, { name: 'watch-party', participants: 2, sharing: true }, { name: 'after-hours', participants: 0, sharing: false }]
 let serverAvailable = true
 let lastUpdateChannel = null
+let restartListener = null
 const participantPreferences = new Map()
 const ok = value => Promise.resolve({ ok: true, value })
 contextBridge.exposeInMainWorld('sharescreen', {
   rendererReady() {}, getConfig: () => Promise.resolve(config),
-  saveConfig: next => { config = next; return ok(config) },
+  saveConfig: next => {
+    // Mirrors main: prompt only when the toggle changes away from the running (enabled) state.
+    if (next.hardwareAcceleration === false && config.hardwareAcceleration !== false) setTimeout(() => restartListener?.(false))
+    config = next; return ok(config)
+  },
   checkForUpdates: channel => { lastUpdateChannel = channel; return ok(true) },
   getTestUpdateChannel: () => Promise.resolve(lastUpdateChannel),
   listRooms: () => serverAvailable ? ok(rooms) : Promise.resolve({ ok: false, error: 'Server unavailable' }), setTestServerAvailable: value => { serverAvailable = Boolean(value) }, createRoom: ({ name }) => { const room = { name, participants: 0, sharing: false }; rooms.push(room); return ok(room) },
@@ -24,5 +29,5 @@ contextBridge.exposeInMainWorld('sharescreen', {
   listSources: () => ok([{ id: 'screen:1', name: 'Entire screen', thumbnail: '' }, { id: 'window:1', name: 'Browser window', thumbnail: '' }]),
   prepareShare: () => ok(true), getCaptureAcceleration: () => Promise.resolve({ ready: true, videoEncode: 'enabled', videoDecode: 'enabled', compositing: 'enabled' }), setSharing: () => ok(true), startSystemAudio: () => ok(true), stopSystemAudio: () => ok(true), onSystemAudio: () => () => {},
   setWindowFullscreen: active => ok(Boolean(active)), onWindowFullscreenChanged: () => () => {},
-  onWindowVisibilityChanged: () => () => {},
+  onWindowVisibilityChanged: () => () => {}, onRestartRequired: listener => { restartListener = listener; return () => { restartListener = null } }, relaunchApp: async () => {},
 })

@@ -114,6 +114,7 @@ const voiceInputVolumeValue = byId('voice-input-volume-value', HTMLOutputElement
 const settingsDialog = byId('settings-dialog', HTMLDialogElement)
 const serverDialog = byId('server-dialog', HTMLDialogElement)
 const deleteDialog = byId('delete-dialog', HTMLDialogElement)
+const restartDialog = byId('restart-dialog', HTMLDialogElement)
 const createDialog = byId('create-dialog', HTMLDialogElement)
 const settingsNote = byId('settings-note', HTMLParagraphElement)
 const serverNote = byId('server-note', HTMLParagraphElement)
@@ -338,6 +339,10 @@ function bind(): void {
       if (!result.ok) showNote(settingsNote, result.error, 'error')
     } finally { button.disabled = false }
   })
+  byId('confirm-restart', HTMLButtonElement).addEventListener('click', (event) => {
+    (event.currentTarget as HTMLButtonElement).disabled = true
+    void window.sharescreen.relaunchApp()
+  })
   byId('confirm-delete-room', HTMLButtonElement).addEventListener('click', () => {
     const name = roomPendingDeletion
     if (name) void onDelete(name)
@@ -422,6 +427,10 @@ function bind(): void {
     windowFullscreen = active
     if (!active) setTheater(false)
     syncFullscreenLabel()
+  })
+  window.sharescreen.onRestartRequired?.((hardwareAcceleration) => {
+    byId('restart-message', HTMLParagraphElement).textContent = `Restart required to ${hardwareAcceleration ? 'enable' : 'disable'} hardware acceleration.`
+    if (!restartDialog.open) restartDialog.showModal()
   })
   window.sharescreen.onWindowVisibilityChanged?.((visible) => {
     windowVisible = visible

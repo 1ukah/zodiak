@@ -117,8 +117,7 @@
             <button id="check-for-updates" class="update-check-button" type="button" title="Check for updates now">Check for updates now</button>
             <hr class="settings-separator" />
             <div class="settings-option">
-              <label class="check" for="hardware-acceleration"><span>Hardware acceleration</span><input id="hardware-acceleration" type="checkbox" role="switch" checked aria-describedby="hardware-acceleration-help" title="Use the GPU for rendering and stream encoding" /></label>
-              <p id="hardware-acceleration-help" class="quality-note">Uses your GPU to encode and display streams. Turn it off if your GPU is overloaded and streams stutter; the CPU is used instead. Applies after zodiak restarts.</p>
+              <label class="check" for="hardware-acceleration"><span>Hardware acceleration</span><input id="hardware-acceleration" type="checkbox" role="switch" checked title="Use the GPU for rendering and stream encoding" /></label>
             </div>
           </section>
         </div>
@@ -140,6 +139,13 @@
       <div class="panel-head"><h2 id="delete-title">Delete room</h2><button class="icon-button" data-close="delete-dialog" title="Close" aria-label="Close delete confirmation"><span data-icon="close"></span></button></div>
       <p id="delete-message" class="dialog-description"></p>
       <p id="delete-note" class="note" role="alert" hidden></p><div class="actions"><button class="ghost" type="button" data-close="delete-dialog">Cancel</button><button id="confirm-delete-room" class="danger" type="button">Delete</button></div>
+    </div>
+  </dialog>
+  <dialog id="restart-dialog" class="dialog small-dialog" aria-labelledby="restart-title" aria-describedby="restart-message">
+    <div class="dialog-content">
+      <div class="panel-head"><h2 id="restart-title">Restart required</h2><button class="icon-button" data-close="restart-dialog" title="Close" aria-label="Close restart prompt"><span data-icon="close"></span></button></div>
+      <p id="restart-message" class="dialog-description"></p>
+      <div class="actions"><button class="ghost" type="button" data-close="restart-dialog">Later</button><button id="confirm-restart" class="primary" type="button">Restart now</button></div>
     </div>
   </dialog>
   <dialog id="picker" class="dialog picker-card" aria-label="Share screen">

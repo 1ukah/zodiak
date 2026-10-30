@@ -48,6 +48,14 @@ const api = {
     ipcRenderer.on(channels.windowVisibilityChanged, wrapped)
     return () => ipcRenderer.removeListener(channels.windowVisibilityChanged, wrapped)
   },
+  onRestartRequired: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, hardwareAcceleration: unknown): void => {
+      if (typeof hardwareAcceleration === 'boolean') listener(hardwareAcceleration)
+    }
+    ipcRenderer.on(channels.restartRequired, wrapped)
+    return () => ipcRenderer.removeListener(channels.restartRequired, wrapped)
+  },
+  relaunchApp: () => ipcRenderer.invoke(channels.relaunchApp),
 } satisfies SharescreenApi
 
 contextBridge.exposeInMainWorld('sharescreen', api)

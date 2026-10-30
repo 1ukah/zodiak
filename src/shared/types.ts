@@ -168,6 +168,8 @@ export const channels = {
   setWindowFullscreen: 'window:set-fullscreen',
   windowFullscreenChanged: 'window:fullscreen-changed',
   windowVisibilityChanged: 'window:visibility-changed',
+  restartRequired: 'app:restart-required',
+  relaunchApp: 'app:relaunch',
 } as const
 
 export interface SharescreenApi {
@@ -195,4 +197,6 @@ export interface SharescreenApi {
   setWindowFullscreen: (active: boolean) => Promise<ActionResult<boolean>>
   onWindowFullscreenChanged: (listener: (active: boolean) => void) => () => void
   onWindowVisibilityChanged: (listener: (visible: boolean) => void) => () => void
+  onRestartRequired: (listener: (hardwareAcceleration: boolean) => void) => () => void
+  relaunchApp: () => Promise<void>
 }
