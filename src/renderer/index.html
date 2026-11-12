@@ -40,23 +40,29 @@
       <p id="connection-banner" class="connection-banner" role="status" hidden>Reconnecting…</p>
       <nav id="channel-list" aria-label="Channels"></nav>
       <p id="list-note" class="note" role="alert" hidden></p>
-      <section id="members-panel" aria-label="Connected people"><div class="members-heading"><span data-icon="people" title="Connected people"></span><span id="members-count"></span><button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button></div><div id="members-list"></div></section>
+      <section id="members-panel" aria-label="Connected people"><div class="members-heading"><span data-icon="people" title="Connected people"></span><span id="members-count"></span></div><div id="members-list"></div></section>
       <div class="sidebar-spacer"></div>
       <footer class="profile-bar"><span id="profile-avatar" class="avatar">?</span><div class="profile-copy"><strong id="profile-name"></strong></div><button id="voice-mute" class="icon-button voice-control" type="button" title="Unmute microphone" aria-label="Unmute microphone" aria-pressed="true"><span data-icon="mic-off"></span></button><button id="voice-deafen" class="icon-button voice-control" type="button" title="Deafen" aria-label="Deafen" aria-pressed="false"><span data-icon="headphones"></span></button><button class="icon-button" data-settings title="Settings" aria-label="Settings"><span data-icon="settings"></span></button></footer>
     </aside>
     <div id="room-workspace">
     <section id="text-view" aria-labelledby="text-title">
-      <header class="text-head"><span class="room-heading-icon" data-icon="hash"></span><h1 id="text-title"></h1></header>
-      <div id="text-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div>
-      <form id="text-form">
-        <p id="text-note" class="note" role="alert" hidden></p>
-        <div class="chat-composer"><textarea id="text-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="text-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div>
-      </form>
+      <header class="text-head"><span class="room-heading-icon" data-icon="hash"></span><h1 id="text-title"></h1><button id="member-list-toggle" class="icon-button" type="button" title="Hide members" aria-label="Hide members" aria-controls="member-list" aria-pressed="true"><span data-icon="people"></span></button></header>
+      <div class="text-body">
+        <div class="text-main">
+          <div id="text-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div>
+          <form id="text-form">
+            <p id="text-note" class="note" role="alert" hidden></p>
+            <div class="chat-composer"><textarea id="text-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="text-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div>
+          </form>
+        </div>
+        <aside id="member-list" aria-label="Members"></aside>
+      </div>
     </section>
     <main id="stage-wrap">
       <header id="stage-head">
         <span class="room-heading-icon" data-icon="monitor"></span><div class="room-heading"><h1 id="room-title">Rooms</h1></div>
         <div class="header-actions">
+          <button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button>
           <button id="pop-out" class="icon-button" type="button" title="Pop out" aria-label="Pop out" hidden><span data-icon="popout"></span></button>
           <button id="fullscreen" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button>
         </div>

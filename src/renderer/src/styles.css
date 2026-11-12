@@ -2583,3 +2583,29 @@ body.view-text #text-view { display: flex; }
 .voice-member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .voice-member-status { display: inline-flex; color: #ee7885; }
 .voice-member-status .icon { width: 13px; height: 13px; }
+
+/* The voice panel docks under the connected voice channel. */
+#members-panel.is-parked { display: none !important; }
+#channel-list #members-panel { flex: none; max-height: none; margin: 0 0 4px; padding: 0 0 0 22px; border: 0; overflow: visible; }
+#channel-list #members-panel .members-heading { display: none; }
+#channel-list #members-list { overflow: visible; }
+#channel-list .member { padding: 4px 4px; }
+#channel-list .member .avatar { width: 22px; height: 22px; border-radius: 50%; font-size: 9px; }
+
+/* Server members on the right of text channels. */
+.text-head #member-list-toggle { margin-left: auto; flex: none; }
+#member-list-toggle[aria-pressed=true] { color: var(--accent); }
+.text-body { display: flex; flex: 1; min-height: 0; }
+.text-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#member-list { width: 240px; flex: none; overflow-y: auto; padding: 8px 8px 16px; border-left: 1px solid var(--line); background: #15161b; }
+body.members-hidden #member-list { display: none; }
+.member-group { margin: 14px 8px 6px; color: #77788a; font-size: 10px; font-weight: 650; letter-spacing: .8px; text-transform: uppercase; }
+.member-row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 5px 8px; border-radius: 6px; }
+.member-row:hover { background: #202127; }
+.member-row-avatar.avatar { position: relative; width: 30px; height: 30px; border-radius: 50%; font-size: 11px; }
+.member-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9cad6; font-size: 13px; }
+.member-row.is-offline { opacity: .45; }
+.presence-dot { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border: 2px solid #15161b; border-radius: 50%; background: #6f7181; }
+.presence-dot.is-online { background: var(--green); }
+.member-owner { flex: none; color: #c9a94f; font-size: 10px; }
+@media (max-width: 900px) { #member-list { display: none; } }

@@ -21,7 +21,7 @@ function message(id: string, author = alice): Message {
 }
 
 function ready(store: ZodiakStore): void {
-  store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [] } })
+  store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [], online: [] } })
 }
 
 describe('ZodiakStore', () => {
@@ -77,11 +77,22 @@ describe('ZodiakStore', () => {
     const store = new ZodiakStore()
     store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [
       { guild_id: '10', channel_id: '12', participants: [{ user_id: alice.id, muted: false, deafened: false, streaming: false }] },
-    ] } })
+    ], online: [] } })
     expect(store.voice.get('12')?.participants).toHaveLength(1)
     store.apply({ t: 'VOICE_STATE_UPDATE', d: { guild_id: '10', channel_id: '12', participants: [] } })
     expect(store.voice.has('12')).toBe(false)
     expect(store.memberName('10', alice.id)).toBe('Alice')
+  })
+
+  it('tracks who is online', () => {
+    const store = new ZodiakStore()
+    store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [], online: [alice.id] } })
+    expect(store.isOnline(bob.id)).toBe(false)
+    store.apply({ t: 'PRESENCE_UPDATE', d: { user_id: bob.id, online: true } })
+    expect(store.isOnline(bob.id)).toBe(true)
+    store.apply({ t: 'PRESENCE_UPDATE', d: { user_id: bob.id, online: false } })
+    expect(store.isOnline(bob.id)).toBe(false)
+    expect(store.isOnline(alice.id)).toBe(true)
   })
 
   it('compares 64-bit IDs as numbers', () => {

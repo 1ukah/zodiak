@@ -298,6 +298,37 @@ export class ZodiakUi {
     this.banner.hidden = !this.signedIn || this.gatewayState === 'ready'
     this.renderRail()
     this.renderSidebar()
+    this.renderMemberList()
+  }
+
+  /** The server's members, online first. Shown on the right of text channels. */
+  private renderMemberList(): void {
+    const list = el('member-list', HTMLElement)
+    const snapshot = this.store.guild(this.guildId)
+    list.replaceChildren()
+    if (!snapshot) return
+    const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
+    const members = [...snapshot.members].sort((a, b) => collator.compare(a.user.display_name, b.user.display_name))
+    const groups: Array<[string, typeof members]> = [
+      ['Online', members.filter((m) => this.store.isOnline(m.user.id))],
+      ['Offline', members.filter((m) => !this.store.isOnline(m.user.id))],
+    ]
+    for (const [label, people] of groups) {
+      if (!people.length) continue
+      list.append(Object.assign(document.createElement('h3'), { className: 'member-group', textContent: `${label} — ${people.length}` }))
+      for (const member of people) {
+        const online = label === 'Online'
+        const row = Object.assign(document.createElement('div'), { className: `member-row${online ? '' : ' is-offline'}` })
+        row.title = `@${member.user.username}`
+        const name = member.user.display_name
+        const avatar = Object.assign(document.createElement('span'), { className: 'avatar member-row-avatar', textContent: [...name][0]?.toUpperCase() ?? '?' })
+        avatar.append(Object.assign(document.createElement('i'), { className: `presence-dot${online ? ' is-online' : ''}` }))
+        avatar.setAttribute('aria-label', online ? 'Online' : 'Offline')
+        row.append(avatar, Object.assign(document.createElement('span'), { className: 'member-row-name', textContent: name }))
+        if (member.user.id === snapshot.guild.owner_id) row.append(Object.assign(document.createElement('span'), { className: 'member-owner', textContent: 'Owner' }))
+        list.append(row)
+      }
+    }
   }
 
   private renderRail(): void {
@@ -320,6 +351,11 @@ export class ZodiakUi {
 
   private renderSidebar(): void {
     const snapshot = this.store.guild(this.guildId)
+    // The voice panel (with volumes and speaking indicators) docks under the connected
+    // voice channel. Park it while the sidebar is rebuilt.
+    const panel = el('members-panel', HTMLElement)
+    panel.classList.add('is-parked')
+    this.channelList.after(panel)
     this.channelList.replaceChildren()
     el('guild-header', HTMLElement).hidden = !snapshot
     if (!snapshot) return
@@ -339,7 +375,13 @@ export class ZodiakUi {
       this.channelList.append(heading)
       for (const channel of channels) {
         this.channelList.append(this.channelRow(snapshot, channel, owner))
-        if (channel.kind === 'voice') this.voiceMembers(snapshot, channel)
+        if (channel.kind !== 'voice') continue
+        if (channel.id === this.bridge.currentVoiceChannel()) {
+          panel.classList.remove('is-parked')
+          this.channelList.append(panel)
+        } else {
+          this.voiceMembers(snapshot, channel)
+        }
       }
     }
   }
@@ -396,6 +438,19 @@ export class ZodiakUi {
       tab.addEventListener('click', () => this.setAuthMode(tab.dataset.authMode === 'register' ? 'register' : 'login'))
     }
     el('auth-retry', HTMLButtonElement).addEventListener('click', () => void this.start())
+
+    const toggle = el('member-list-toggle', HTMLButtonElement)
+    const showMembers = (visible: boolean) => {
+      document.body.classList.toggle('members-hidden', !visible)
+      toggle.setAttribute('aria-pressed', String(visible))
+      labelButton(toggle, visible ? 'Hide members' : 'Show members')
+    }
+    showMembers(localStorage.getItem('zodiak.membersHidden') !== 'true')
+    toggle.addEventListener('click', () => {
+      const visible = document.body.classList.contains('members-hidden')
+      localStorage.setItem('zodiak.membersHidden', String(!visible))
+      showMembers(visible)
+    })
 
     el('create-room-action', HTMLButtonElement).addEventListener('click', () => {
       clearNote(el('guild-dialog-note', HTMLParagraphElement))

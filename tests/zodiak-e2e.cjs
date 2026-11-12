@@ -81,6 +81,16 @@ async function run(win) {
   if (link !== 'https://example.com/page') throw Error(`Links were not made safely clickable: ${link}`)
   console.log('PASS Messages from other members arrive live')
 
+  const memberState = (name) => `[...document.querySelectorAll('#member-list .member-row')].find(row => row.querySelector('.member-row-name').textContent === ${JSON.stringify(name)})?.classList.contains('is-offline')`
+  await until('the friend offline in the members column', `${memberState('Friend')} === true && ${memberState('E2E Tester')} === false`)
+  const socket = new WebSocket(`${api.replace(/^http/, 'ws')}/v1/gateway`)
+  socket.addEventListener('message', () => socket.send(JSON.stringify({ op: 'identify', d: { token: friend.token } })), { once: true })
+  await until('the friend online in the members column', `${memberState('Friend')} === false`)
+  await shot('zodiak-04-members.png')
+  socket.close()
+  await until('the friend offline again', `${memberState('Friend')} === true`)
+  console.log('PASS The members column shows who is online and offline')
+
   await click('#guild-invite')
   await until('an invite code', `/^[A-Za-z0-9]{10}$/.test(document.querySelector('#invite-code').value)`)
   await shot('zodiak-02-invite.png')

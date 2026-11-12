@@ -8,8 +8,9 @@ import type { MemberAdd } from "./MemberAdd";
 import type { MemberRemove } from "./MemberRemove";
 import type { Message } from "./Message";
 import type { MessageDelete } from "./MessageDelete";
+import type { PresenceUpdate } from "./PresenceUpdate";
 import type { Ready } from "./Ready";
 import type { User } from "./User";
 import type { VoiceChannelState } from "./VoiceChannelState";
 
-export type GatewayEvent = { "t": "READY", "d": Ready } | { "t": "USER_UPDATE", "d": User } | { "t": "GUILD_CREATE", "d": GuildSnapshot } | { "t": "GUILD_UPDATE", "d": Guild } | { "t": "GUILD_DELETE", "d": GuildDelete } | { "t": "CHANNEL_CREATE", "d": Channel } | { "t": "CHANNEL_UPDATE", "d": Channel } | { "t": "CHANNEL_DELETE", "d": ChannelDelete } | { "t": "MEMBER_ADD", "d": MemberAdd } | { "t": "MEMBER_REMOVE", "d": MemberRemove } | { "t": "MESSAGE_CREATE", "d": Message } | { "t": "MESSAGE_UPDATE", "d": Message } | { "t": "MESSAGE_DELETE", "d": MessageDelete } | { "t": "VOICE_STATE_UPDATE", "d": VoiceChannelState };
+export type GatewayEvent = { "t": "READY", "d": Ready } | { "t": "USER_UPDATE", "d": User } | { "t": "GUILD_CREATE", "d": GuildSnapshot } | { "t": "GUILD_UPDATE", "d": Guild } | { "t": "GUILD_DELETE", "d": GuildDelete } | { "t": "CHANNEL_CREATE", "d": Channel } | { "t": "CHANNEL_UPDATE", "d": Channel } | { "t": "CHANNEL_DELETE", "d": ChannelDelete } | { "t": "MEMBER_ADD", "d": MemberAdd } | { "t": "MEMBER_REMOVE", "d": MemberRemove } | { "t": "MESSAGE_CREATE", "d": Message } | { "t": "MESSAGE_UPDATE", "d": Message } | { "t": "MESSAGE_DELETE", "d": MessageDelete } | { "t": "VOICE_STATE_UPDATE", "d": VoiceChannelState } | { "t": "PRESENCE_UPDATE", "d": PresenceUpdate };

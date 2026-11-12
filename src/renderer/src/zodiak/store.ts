@@ -27,6 +27,8 @@ export class ZodiakStore {
   guilds: GuildSnapshot[] = []
   /** Voice channels with participants, by channel. */
   voice = new Map<Id, VoiceChannelState>()
+  /** Users who share a server with this user and are online, including this user. */
+  online = new Set<Id>()
   private histories = new Map<Id, ChannelHistory>()
   private listeners = new Set<(change: StoreChange) => void>()
 
@@ -43,8 +45,13 @@ export class ZodiakStore {
     this.user = null
     this.guilds = []
     this.voice.clear()
+    this.online.clear()
     this.histories.clear()
     this.emit({ kind: 'all' })
+  }
+
+  isOnline(userId: Id): boolean {
+    return userId === this.user?.id || this.online.has(userId)
   }
 
   /** Display name of a server member, or `undefined` when the user is not a member. */
@@ -104,8 +111,14 @@ export class ZodiakStore {
         this.user = event.d.user
         this.guilds = event.d.guilds.map((g) => ({ ...g, channels: [...g.channels].sort(byPosition) }))
         this.voice = new Map(event.d.voice_states.map((state) => [state.channel_id, state]))
+        this.online = new Set(event.d.online)
         this.histories.clear()
         this.emit({ kind: 'all' })
+        return
+      case 'PRESENCE_UPDATE':
+        if (event.d.online) this.online.add(event.d.user_id)
+        else this.online.delete(event.d.user_id)
+        this.emit({ kind: 'guilds' })
         return
       case 'VOICE_STATE_UPDATE':
         if (event.d.participants.length) this.voice.set(event.d.channel_id, event.d)

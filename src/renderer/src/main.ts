@@ -254,7 +254,8 @@ function bind(): void {
   document.addEventListener('click', dismissParticipantAudio)
   document.addEventListener('focusin', dismissParticipantAudio)
   window.addEventListener('resize', positionParticipantAudio)
-  membersPanel.addEventListener('scroll', positionParticipantAudio, true)
+  // The panel docks inside the scrolling channel list, so listen for any scroll.
+  document.addEventListener('scroll', positionParticipantAudio, true)
   const settingsTabs = [...settingsDialog.querySelectorAll<HTMLButtonElement>('[data-settings-tab]')]
   settingsTabs.forEach((tab, index) => {
     tab.addEventListener('click', () => selectSettingsTab(tab.dataset.settingsTab!))
@@ -941,9 +942,8 @@ function positionParticipantAudio(): void {
   const member = participantAudioMember()
   if (!member || membersPanel.hidden || roomSidebar.hidden || document.body.classList.contains('theater')) { closeParticipantAudio(); return }
   const bounds = member.getBoundingClientRect()
-  const panel = membersPanel.getBoundingClientRect()
-  const list = membersList.getBoundingClientRect()
-  if (bounds.bottom <= Math.max(panel.top, list.top) || bounds.top >= Math.min(panel.bottom, list.bottom)) { closeParticipantAudio(); return }
+  const clips = [membersPanel, membersList, membersPanel.closest('#channel-list')].filter((node): node is Element => node !== null).map(node => node.getBoundingClientRect())
+  if (bounds.bottom <= Math.max(...clips.map(r => r.top)) || bounds.top >= Math.min(...clips.map(r => r.bottom))) { closeParticipantAudio(); return }
   participantAudio.style.width = `${Math.min(220, bounds.width)}px`
   participantAudio.style.left = `${Math.max(8, Math.min(bounds.right - participantAudio.offsetWidth, window.innerWidth - participantAudio.offsetWidth - 8))}px`
   participantAudio.style.top = `${bounds.bottom + 4}px`

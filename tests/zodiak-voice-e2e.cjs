@@ -163,14 +163,14 @@ async function guest(win) {
     await until('decoded screen video', `Promise.all(window.__pcs.map(pc => pc.getStats())).then(rs => rs.some(r => [...r.values()].some(s => s.type === 'inbound-rtp' && s.kind === 'video' && s.framesDecoded > 10)))`, 25_000)
     const video = await inbound('video')
     log(`PASS watches the host's screen (${video.frames} frames decoded)`)
-    await until('the sidebar voice list', `document.querySelectorAll('.voice-members li').length === 2 && Boolean(document.querySelector('.voice-members .member-live'))`, 10_000)
-    log('PASS the sidebar shows both people and the LIVE screen')
+    await until('the voice panel under the channel', `document.querySelectorAll('#channel-list #members-panel .member').length === 2 && Boolean(document.querySelector('#channel-list #members-panel .member-live')) && !document.querySelector('.voice-members')`, 10_000)
+    log('PASS the connected channel shows one list with both people and the LIVE screen')
     await new Promise((resolve) => setTimeout(resolve, 800))
     await shot('zodiak-05-voice-guest.png')
     await fs.writeFile(path.join(shared, 'guest-watching.json'), '{}')
 
     await until('the new name in voice', `[...document.querySelectorAll('#members-list .member-name')].some(n => n.textContent === 'Host Renamed')
-      && [...document.querySelectorAll('.voice-members .voice-member-name')].some(n => n.textContent === 'Host Renamed')`, 5_000)
+      && [...document.querySelectorAll('#member-list .member-row:not(.is-offline) .member-row-name')].some(n => n.textContent === 'Host Renamed')`, 5_000)
     log('PASS sees the host\'s new name in voice at once')
     await fs.writeFile(path.join(shared, 'guest-saw-rename.json'), '{}')
 
