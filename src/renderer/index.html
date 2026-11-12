@@ -2,26 +2,58 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: https:; font-src 'self'; connect-src 'self' ws: wss: http: https: blob: data:; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'none'; form-action 'none'" />
   <title>zodiak</title><link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
   <div class="app-titlebar"><img class="app-titlebar-logo" src="/logo.svg" alt="" /></div>
+  <section id="auth-screen" aria-label="Log in" hidden>
+    <form id="auth-form" class="auth-card" novalidate>
+      <img class="auth-logo" src="/logo.svg" alt="zodiak" />
+      <div class="auth-tabs" role="tablist" aria-label="Account">
+        <button id="auth-tab-login" type="button" role="tab" aria-selected="true" data-auth-mode="login">Log in</button>
+        <button id="auth-tab-register" type="button" role="tab" aria-selected="false" data-auth-mode="register">Create account</button>
+      </div>
+      <label class="field" for="auth-username">Username<input id="auth-username" type="text" autocomplete="username" maxlength="32" spellcheck="false" required /></label>
+      <label class="field" id="auth-display-name-field" for="auth-display-name" hidden>Display name<input id="auth-display-name" type="text" autocomplete="nickname" maxlength="32" placeholder="Optional" /></label>
+      <label class="field" for="auth-password">Password<input id="auth-password" type="password" autocomplete="current-password" maxlength="128" required /></label>
+      <p id="auth-hint" class="auth-hint" hidden>2–32 characters: a–z, 0–9, _ and . · Password: 8 or more characters</p>
+      <p id="auth-note" class="note" role="alert" hidden></p>
+      <button id="auth-submit" class="primary" type="submit">Log in</button>
+    </form>
+    <div id="auth-offline" class="auth-card" hidden>
+      <img class="auth-logo" src="/logo.svg" alt="zodiak" />
+      <p id="auth-offline-message" class="dialog-description" role="alert"></p>
+      <button id="auth-retry" class="primary" type="button">Try again</button>
+    </div>
+  </section>
   <div id="shell">
-    <nav class="workspace-rail" aria-label="Rooms">
-      <div id="room-list" aria-label="Rooms"></div>
-      <button id="create-room-action" class="rail-button rail-create" data-create-room title="Create room" aria-label="Create room"><span data-icon="plus"></span></button>
+    <nav class="workspace-rail" aria-label="Servers">
+      <div id="room-list" aria-label="Servers"></div>
+      <button id="create-room-action" class="rail-button rail-create" title="Add a server" aria-label="Add a server"><span data-icon="plus"></span></button>
       <div class="rail-footer">
         <button id="lobby-settings" class="rail-button" title="Settings" aria-label="Settings"><span data-icon="settings"></span></button>
         <button id="server-settings" class="rail-button rail-server" title="Server connection" aria-label="Server connection"><span data-icon="server"></span></button>
       </div>
     </nav>
     <aside class="sidebar" id="room-sidebar" hidden>
+      <header id="guild-header" class="guild-header"><h2 id="guild-name"></h2><button id="guild-invite" class="icon-button" type="button" title="Invite people" aria-label="Invite people"><span data-icon="invite"></span></button><button id="guild-settings" class="icon-button" type="button" title="Server settings" aria-label="Server settings"><span data-icon="settings"></span></button></header>
+      <p id="connection-banner" class="connection-banner" role="status" hidden>Reconnecting…</p>
+      <nav id="channel-list" aria-label="Channels"></nav>
       <p id="list-note" class="note" role="alert" hidden></p>
       <section id="members-panel" aria-label="Connected people"><div class="members-heading"><span data-icon="people" title="Connected people"></span><span id="members-count"></span><button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button></div><div id="members-list"></div></section>
       <div class="sidebar-spacer"></div>
       <footer class="profile-bar"><span id="profile-avatar" class="avatar">?</span><div class="profile-copy"><strong id="profile-name"></strong></div><button id="voice-mute" class="icon-button voice-control" type="button" title="Unmute microphone" aria-label="Unmute microphone" aria-pressed="true"><span data-icon="mic-off"></span></button><button id="voice-deafen" class="icon-button voice-control" type="button" title="Deafen" aria-label="Deafen" aria-pressed="false"><span data-icon="headphones"></span></button><button class="icon-button" data-settings title="Settings" aria-label="Settings"><span data-icon="settings"></span></button></footer>
     </aside>
     <div id="room-workspace">
+    <section id="text-view" aria-labelledby="text-title">
+      <header class="text-head"><span class="room-heading-icon" data-icon="hash"></span><h1 id="text-title"></h1></header>
+      <div id="text-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div>
+      <form id="text-form">
+        <p id="text-note" class="note" role="alert" hidden></p>
+        <div class="chat-composer"><textarea id="text-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="text-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div>
+      </form>
+    </section>
     <main id="stage-wrap">
       <header id="stage-head">
         <span class="room-heading-icon" data-icon="monitor"></span><div class="room-heading"><h1 id="room-title">Rooms</h1></div>
@@ -60,11 +92,44 @@
   </div>
   <div id="chat-bubbles" aria-label="Chat previews"></div>
   <dialog id="chat-image-dialog" aria-label="Shared image" tabindex="-1"><button id="chat-image-previous" class="icon-button chat-image-nav" type="button" title="Previous image" aria-label="Previous image" hidden><span data-icon="previous"></span></button><img id="chat-image-full" alt="Shared image" /><button id="chat-image-next" class="icon-button chat-image-nav" type="button" title="Next image" aria-label="Next image" hidden><span data-icon="next"></span></button><div id="chat-image-sequence" role="group" aria-label="Images in this message" hidden></div><span id="chat-image-position" class="sr-only" role="status" aria-live="polite"></span></dialog>
-  <dialog id="create-dialog" class="dialog small-dialog" aria-labelledby="create-title">
-    <form id="create-form" class="dialog-content">
-      <div class="panel-head"><h2 id="create-title">New room</h2><button class="icon-button" type="button" data-close="create-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
-      <div class="create-input-row"><input id="new-room" type="text" aria-label="Room name" maxlength="64" placeholder="Room name" pattern="[A-Za-z0-9_\-]+" title="Letters, numbers, dashes, underscores" spellcheck="false" autocomplete="off" required /><button id="create-room" class="primary icon-action" type="submit" title="Create room" aria-label="Create room"><span data-icon="arrow"></span></button></div>
-      <p id="create-note" class="note" role="alert" hidden></p>
+  <dialog id="guild-dialog" class="dialog small-dialog" aria-labelledby="guild-dialog-title">
+    <div class="dialog-content">
+      <div class="panel-head"><h2 id="guild-dialog-title">Add a server</h2><button class="icon-button" type="button" data-close="guild-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
+      <form id="guild-create-form" class="dialog-form">
+        <label class="field" for="guild-create-name">Create a server<span class="create-input-row"><input id="guild-create-name" type="text" maxlength="100" placeholder="Server name" autocomplete="off" required /><button class="primary icon-action" type="submit" title="Create server" aria-label="Create server"><span data-icon="arrow"></span></button></span></label>
+      </form>
+      <form id="guild-join-form" class="dialog-form">
+        <label class="field" for="guild-join-code">Join with an invite code<span class="create-input-row"><input id="guild-join-code" type="text" maxlength="64" placeholder="Invite code" spellcheck="false" autocomplete="off" required /><button class="primary icon-action" type="submit" title="Join server" aria-label="Join server"><span data-icon="arrow"></span></button></span></label>
+      </form>
+      <p id="guild-dialog-note" class="note" role="alert" hidden></p>
+    </div>
+  </dialog>
+  <dialog id="invite-dialog" class="dialog small-dialog" aria-labelledby="invite-title">
+    <div class="dialog-content">
+      <div class="panel-head"><h2 id="invite-title">Invite people</h2><button class="icon-button" type="button" data-close="invite-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
+      <p class="dialog-description">Share this code. It works for 7 days.</p>
+      <div class="create-input-row"><input id="invite-code" type="text" readonly aria-label="Invite code" spellcheck="false" /><button id="invite-copy" class="primary icon-action" type="button" title="Copy invite code" aria-label="Copy invite code"><span data-icon="copy"></span></button></div>
+      <p id="invite-note" class="note" role="status" hidden></p>
+    </div>
+  </dialog>
+  <dialog id="channel-dialog" class="dialog small-dialog" aria-labelledby="channel-dialog-title">
+    <form id="channel-form" class="dialog-content">
+      <div class="panel-head"><h2 id="channel-dialog-title">Create channel</h2><button class="icon-button" type="button" data-close="channel-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
+      <label class="field" for="channel-name">Name<input id="channel-name" type="text" maxlength="100" autocomplete="off" required /></label>
+      <label class="field" id="channel-kind-field" for="channel-kind">Type<select id="channel-kind"><option value="text">Text</option><option value="voice">Voice</option></select></label>
+      <p id="channel-note" class="note" role="alert" hidden></p>
+      <div class="actions"><button id="channel-delete" class="danger" type="button" hidden>Delete channel</button><button id="channel-save" class="primary" type="submit">Create</button></div>
+    </form>
+  </dialog>
+  <dialog id="guild-settings-dialog" class="dialog small-dialog" aria-labelledby="guild-settings-title">
+    <form id="guild-settings-form" class="dialog-content">
+      <div class="panel-head"><h2 id="guild-settings-title">Server settings</h2><button class="icon-button" type="button" data-close="guild-settings-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
+      <div id="guild-owner-settings">
+        <label class="field" for="guild-rename">Server name<input id="guild-rename" type="text" maxlength="100" autocomplete="off" required /></label>
+        <div class="actions"><button id="guild-add-channel" class="ghost" type="button">Create channel</button><button class="primary" type="submit">Save</button></div>
+      </div>
+      <p id="guild-settings-note" class="note" role="alert" hidden></p>
+      <div class="actions"><button id="guild-delete" class="danger" type="button">Delete server</button><button id="guild-leave" class="danger" type="button">Leave server</button></div>
     </form>
   </dialog>
   <dialog id="settings-dialog" class="dialog settings-dialog" aria-label="Settings">
@@ -81,7 +146,10 @@
         <header class="settings-header"><h2 id="settings-section-title">Account</h2><button class="icon-button" data-close="settings-dialog" title="Close" aria-label="Close settings"><span data-icon="close"></span></button></header>
         <div class="settings-panels">
           <section id="settings-panel-account" role="tabpanel" aria-labelledby="settings-tab-account" tabindex="0">
-            <label class="field" for="display-name">Name<input id="display-name" type="text" maxlength="40" autocomplete="nickname" title="Updates your name in the current room" /></label>
+            <label class="field" for="display-name">Display name<input id="display-name" type="text" maxlength="32" autocomplete="nickname" title="Your name in every server" /></label>
+            <p id="account-username" class="quality-note"></p>
+            <hr class="settings-separator" />
+            <div class="actions account-actions"><button id="logout" class="ghost" type="button"><span data-icon="leave"></span>Log out</button><button id="logout-all" class="danger" type="button">Log out on all devices</button></div>
           </section>
           <section id="settings-panel-audio" role="tabpanel" aria-labelledby="settings-tab-audio" tabindex="0" hidden>
             <div class="settings-section" id="audio-controls">
@@ -134,11 +202,11 @@
       <p id="server-note" class="note" role="alert" hidden></p><div class="actions"><button id="save-server-settings" class="primary icon-action" title="Save server connection" aria-label="Save server connection"><span data-icon="check"></span></button></div>
     </div>
   </dialog>
-  <dialog id="delete-dialog" class="dialog small-dialog" aria-labelledby="delete-title">
+  <dialog id="confirm-dialog" class="dialog small-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
     <div class="dialog-content delete-dialog-content">
-      <div class="panel-head"><h2 id="delete-title">Delete room</h2><button class="icon-button" data-close="delete-dialog" title="Close" aria-label="Close delete confirmation"><span data-icon="close"></span></button></div>
-      <p id="delete-message" class="dialog-description"></p>
-      <p id="delete-note" class="note" role="alert" hidden></p><div class="actions"><button class="ghost" type="button" data-close="delete-dialog">Cancel</button><button id="confirm-delete-room" class="danger" type="button">Delete</button></div>
+      <div class="panel-head"><h2 id="confirm-title"></h2><button class="icon-button" data-close="confirm-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
+      <p id="confirm-message" class="dialog-description"></p>
+      <p id="confirm-note" class="note" role="alert" hidden></p><div class="actions"><button class="ghost" type="button" data-close="confirm-dialog">Cancel</button><button id="confirm-action" class="danger" type="button"></button></div>
     </div>
   </dialog>
   <dialog id="restart-dialog" class="dialog small-dialog" aria-labelledby="restart-title" aria-describedby="restart-message">

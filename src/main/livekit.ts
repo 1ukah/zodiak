@@ -12,8 +12,8 @@ export interface LiveKitServer {
 
 export async function connectServer(): Promise<LiveKitServer> {
   const config = await loadConfig()
-  if (!config.apiKey || !config.apiSecret) {
-    throw new Error('Add the API key and secret in Server settings')
+  if (!config.url || !config.apiKey || !config.apiSecret) {
+    throw new Error('Voice uses LiveKit until the Zodiak media server is ready. Add the LiveKit server in Server settings.')
   }
   const { signalUrl, apiUrl } = resolveServer(config.url)
   return {

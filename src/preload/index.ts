@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { GatewayEvent } from '../shared/protocol'
 import { channels, type SharescreenApi, type UpdateState } from '../shared/types'
+import { zodiakChannels, type GatewayState, type ZodiakBridge } from '../shared/zodiak'
 
 const api = {
   rendererReady: () => ipcRenderer.send(channels.rendererReady),
@@ -59,3 +61,22 @@ const api = {
 } satisfies SharescreenApi
 
 contextBridge.exposeInMainWorld('sharescreen', api)
+
+function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
+  const wrapped = (_event: Electron.IpcRendererEvent, payload: T): void => listener(payload)
+  ipcRenderer.on(channel, wrapped)
+  return () => ipcRenderer.removeListener(channel, wrapped)
+}
+
+const zodiak = {
+  session: () => ipcRenderer.invoke(zodiakChannels.session),
+  login: (request) => ipcRenderer.invoke(zodiakChannels.login, request),
+  register: (request) => ipcRenderer.invoke(zodiakChannels.register, request),
+  logout: (everywhere) => ipcRenderer.invoke(zodiakChannels.logout, everywhere),
+  request: (request) => ipcRenderer.invoke(zodiakChannels.request, request),
+  onEvent: (listener) => subscribe<GatewayEvent>(zodiakChannels.event, listener),
+  onGatewayState: (listener) => subscribe<GatewayState>(zodiakChannels.gatewayState, listener),
+  onSignedOut: (listener) => subscribe<void>(zodiakChannels.signedOut, () => listener()),
+} satisfies ZodiakBridge
+
+contextBridge.exposeInMainWorld('zodiak', zodiak)

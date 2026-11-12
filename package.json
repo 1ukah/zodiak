@@ -16,6 +16,8 @@
     "start": "electron-vite preview",
     "build:system-audio-capture": "dotnet publish native/system-audio-capture/SystemAudioCapture.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o native/system-audio-capture/publish",
     "version:sync": "node scripts/sync-version.cjs",
+    "protocol:sync": "node scripts/sync-protocol.cjs",
+    "test:unit": "vitest run",
     "pack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-installer.ps1",
     "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-installer.ps1 -Publish",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
@@ -113,13 +115,15 @@
     "electron-updater": "^6.8.9",
     "livekit-client": "^2.22.3",
     "livekit-server-sdk": "^2.19.1",
-    "lucide": "^1.48.0"
+    "lucide": "^1.48.0",
+    "undici": "^8.12.4"
   },
   "devDependencies": {
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "typescript": "^7.0.2",
-    "vite": "^7.3.6"
+    "vite": "^7.3.6",
+    "vitest": "^5.1.0"
   }
 }

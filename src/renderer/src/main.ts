@@ -1,4 +1,6 @@
-import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type Role, type RoomSummary, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
+import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type Role, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
+import type { User } from '../../shared/protocol'
+import { ZodiakUi } from './zodiak/ui'
 import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, sendChatMessage, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, setTelemetryEnabled, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session-loader'
 import { hydrateIcons, icon, labelButton, setButtonIcon } from './icons'
 import { RoomChat } from './chat'
@@ -11,13 +13,9 @@ import { initializeUpdateUI } from './update-ui'
 
 hydrateIcons()
 
-const createForm = byId('create-form', HTMLFormElement)
-const newRoomInput = byId('new-room', HTMLInputElement)
-const createButton = byId('create-room', HTMLButtonElement)
 const listNote = byId('list-note', HTMLParagraphElement)
 const roomList = elementById('room-list')
 const workspaceRail = document.querySelector<HTMLElement>('.workspace-rail')!
-const createRoomAction = byId('create-room-action', HTMLButtonElement)
 const nameInput = byId('display-name', HTMLInputElement)
 const urlInput = byId('server-url', HTMLInputElement)
 const keyInput = byId('api-key', HTMLInputElement)
@@ -113,14 +111,9 @@ const voiceInputVolume = byId('voice-input-volume', HTMLInputElement)
 const voiceInputVolumeValue = byId('voice-input-volume-value', HTMLOutputElement)
 const settingsDialog = byId('settings-dialog', HTMLDialogElement)
 const serverDialog = byId('server-dialog', HTMLDialogElement)
-const deleteDialog = byId('delete-dialog', HTMLDialogElement)
 const restartDialog = byId('restart-dialog', HTMLDialogElement)
-const createDialog = byId('create-dialog', HTMLDialogElement)
 const settingsNote = byId('settings-note', HTMLParagraphElement)
 const serverNote = byId('server-note', HTMLParagraphElement)
-const deleteNote = byId('delete-note', HTMLParagraphElement)
-const deleteMessage = byId('delete-message', HTMLParagraphElement)
-const createNote = byId('create-note', HTMLParagraphElement)
 const roomSidebar = byId('room-sidebar', HTMLElement)
 const participantGrid = elementById('participant-grid')
 let savedConfig: AppConfig | null = null
@@ -132,7 +125,7 @@ let publishing = false
 let sourcesRequest = 0
 let showStatistics = false
 
-let rooms: RoomSummary[] = []
+// The voice channel ID while connected. Until zodiak-media exists, it is also the LiveKit room name.
 let currentRoom: string | null = null
 let selectedSourceId: string | null = null
 let connection: Presence = 'offline'
@@ -141,17 +134,12 @@ let participants: RoomParticipant[] = []
 let selectedStreamId: string | null = null
 let hideLocalPreview = false
 let gridView = false
-let listing = false
-let nextBackgroundRoomRefresh = 0
-let serverUnavailable = false
 let telemetry: StreamTelemetry = {}
 let captureAccelerationStatus: CaptureAccelerationStatus | null = null
 let lastGridSignature = ''
 let gridVideos = new Map<string, HTMLVideoElement>()
-let roomsFingerprint = ''
 let selectedAudioOutput = 'default'
 let windowFullscreen = false
-let windowVisible = true
 let screenControlsVisible = false
 let screenControlsTimer: number | null = null
 // Keyed by participant: a re-shared screen is a new stream but keeps the same
@@ -160,8 +148,8 @@ const streamVolumes = new Map<string, number>()
 let participantPreferenceServer: string | null = null
 let participantPreferences = new Map<string, ParticipantPreference>()
 const participantPreferenceWrites = new Set<Promise<void>>()
-let roomPendingDeletion: string | null = null
 const chat = new RoomChat(sendChatMessage, makeAvatar, () => renderMembers())
+let zodiak: ZodiakUi
 
 const hooks: SessionHooks = {
   onVoice: (state) => { voiceState = state; syncVoiceUI(); if (!loopbackRequested && settingsDialog.open) showInputLevel(state.inputLevel) },
@@ -218,12 +206,14 @@ void boot().catch((error) => {
 })
 
 async function boot(): Promise<void> {
-  if (!window.sharescreen) {
-    serverUnavailable = true
-    renderRooms()
-    renderChrome()
-    return
-  }
+  if (!window.sharescreen || !window.zodiak) throw new Error('The app bridge is missing')
+  zodiak = new ZodiakUi({
+    currentVoiceChannel: () => currentRoom,
+    joinVoice: (channel) => onJoin(channel.id),
+    leaveVoice: () => currentRoom ? onLeave() : Promise.resolve(),
+    layoutChanged: () => renderChrome(),
+    userChanged: (user) => syncAccount(user),
+  })
   fillForm(await window.sharescreen.getConfig())
   bind()
   initializeUpdateUI(window.sharescreen)
@@ -231,21 +221,20 @@ async function boot(): Promise<void> {
   syncAudioControls()
   renderChrome()
   window.sharescreen.rendererReady()
-  void refreshRooms()
-  // Room events keep an open room current instantly. The lobby poll is only a
-  // fallback for other rooms and deliberately does not rebuild the video UI
-  // when the response is unchanged. Inside a room, only other rooms' rail
-  // badges depend on it, so it runs less often to save requests and wake-ups.
-  let lastRoomPoll = 0
-  window.setInterval(() => {
-    const now = Date.now()
-    if (currentRoom && now - lastRoomPoll < 15_000) return
-    lastRoomPoll = now
-    void refreshRooms(true)
-  }, 5_000)
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) void refreshRooms()
-  })
+  await zodiak.start()
+}
+
+/** The account display name is also the voice name. */
+function syncAccount(user: User | null): void {
+  if (!user || !savedConfig) return
+  nameInput.value = user.display_name
+  elementById('profile-name').textContent = user.display_name
+  elementById('profile-avatar').textContent = initials(user.display_name)
+  elementById('profile-avatar').style.setProperty('--avatar-hue', String(avatarHue(user.display_name)))
+  if (savedConfig.displayName === user.display_name) return
+  savedConfig = { ...savedConfig, displayName: user.display_name }
+  void window.sharescreen.saveConfig(savedConfig).then((saved) => { if (saved.ok) savedConfig = saved.value })
+  if (currentRoom) void updateDisplayName(user.display_name).catch(() => undefined)
 }
 
 function bind(): void {
@@ -286,12 +275,6 @@ function bind(): void {
       settingsTabs[next].focus()
     })
   })
-  createForm.addEventListener('submit', (event) => { event.preventDefault(); void onCreateRoom() })
-  document.querySelectorAll<HTMLButtonElement>('[data-create-room]').forEach((button) => button.addEventListener('click', () => {
-    clearNote(createNote)
-    createDialog.showModal()
-    newRoomInput.focus()
-  }))
   document.querySelectorAll<HTMLButtonElement>('[data-settings]').forEach((button) => button.addEventListener('click', () => openSettings()))
   elementById('lobby-settings').addEventListener('click', openSettings)
   elementById('server-settings').addEventListener('click', openServerSettings)
@@ -299,35 +282,30 @@ function bind(): void {
   settingsDialog.addEventListener('close', () => { setVoiceInputLevelReporting(false); stopMicrophoneTest(); if (savedConfig) { fillForm(savedConfig); void previewVoiceSettings() } })
   window.addEventListener('pagehide', stopMicrophoneTest)
   serverDialog.addEventListener('close', () => { if (savedConfig) fillForm(savedConfig) })
-  deleteDialog.addEventListener('close', () => { roomPendingDeletion = null; clearNote(deleteNote) })
   byId('save-settings', HTMLButtonElement).addEventListener('click', async () => {
     const button = byId('save-settings', HTMLButtonElement)
     button.disabled = true
     try {
-      const previousName = savedConfig?.displayName
+      const name = nameInput.value.trim()
+      const account = zodiak.user()
+      if (account && name !== account.display_name) {
+        try { await zodiak.updateDisplayName(name) }
+        catch (error) { showNote(settingsNote, messageOf(error), 'error'); return }
+      }
       const saved = await persistConfig()
       if (!saved) return
       if (currentRoom) {
         try { await configureVoice({ enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength, echoCancellation: saved.voiceEchoCancellation, autoGainControl: saved.voiceAutoGainControl, noiseGate: saved.voiceNoiseGate, autoInputSensitivity: saved.voiceAutoInputSensitivity, inputSensitivity: saved.voiceInputSensitivity }) }
         catch (error) { showNote(settingsNote, `Settings saved. ${messageOf(error)}`, 'error'); return }
       }
-      if (currentRoom && saved.displayName !== previousName) {
-        try {
-          await updateDisplayName(saved.displayName)
-        } catch (error) {
-          showNote(settingsNote, `Saved for future rooms, but could not update this room: ${messageOf(error)}`, 'error')
-          return
-        }
-      }
       settingsDialog.close()
-      void refreshRooms()
     }
     finally { button.disabled = false }
   })
   byId('save-server-settings', HTMLButtonElement).addEventListener('click', async () => {
     const button = byId('save-server-settings', HTMLButtonElement)
     button.disabled = true
-    try { if (await persistConfig()) { serverDialog.close(); void refreshRooms() } }
+    try { if (await persistConfig()) serverDialog.close() }
     finally { button.disabled = false }
   })
   byId('check-for-updates', HTMLButtonElement).addEventListener('click', async () => {
@@ -342,10 +320,6 @@ function bind(): void {
   byId('confirm-restart', HTMLButtonElement).addEventListener('click', (event) => {
     (event.currentTarget as HTMLButtonElement).disabled = true
     void window.sharescreen.relaunchApp()
-  })
-  byId('confirm-delete-room', HTMLButtonElement).addEventListener('click', () => {
-    const name = roomPendingDeletion
-    if (name) void onDelete(name)
   })
   elementById('exit-focus').addEventListener('click', () => void exitFocusView())
   picker.addEventListener('cancel', (event) => { event.preventDefault(); if (!publishing) closePicker() })
@@ -433,10 +407,8 @@ function bind(): void {
     if (!restartDialog.open) restartDialog.showModal()
   })
   window.sharescreen.onWindowVisibilityChanged?.((visible) => {
-    windowVisible = visible
     setViewerVisible(visible)
     document.body.classList.toggle('window-hidden', !visible)
-    if (visible) void refreshRooms()
   })
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && participantAudioId) {
@@ -458,84 +430,8 @@ function bind(): void {
   window.addEventListener('resize', syncRailOverflow)
 }
 
-async function refreshRooms(background = false): Promise<void> {
-  if (listing) return
-  if (background && (!windowVisible || document.hidden || Date.now() < nextBackgroundRoomRefresh || !savedConfig?.url || !savedConfig.apiKey || !savedConfig.apiSecret)) return
-  if (!savedConfig?.url || !savedConfig.apiKey || !savedConfig.apiSecret) {
-    if (serverUnavailable && !rooms.length) return
-    serverUnavailable = true
-    rooms = []
-    roomsFingerprint = ''
-    renderRooms()
-    renderChrome()
-    return
-  }
-  listing = true
-  try {
-    const listed = await window.sharescreen.listRooms()
-    if (!listed.ok) {
-      nextBackgroundRoomRefresh = Date.now() + 30_000
-      if (serverUnavailable && !rooms.length) return
-      chat.clearHistory()
-      serverUnavailable = true
-      rooms = []
-      roomsFingerprint = ''
-      clearNote(listNote)
-      renderRooms()
-      renderChrome()
-      return
-    }
-    const fingerprint = JSON.stringify(listed.value)
-    const changed = fingerprint !== roomsFingerprint || serverUnavailable
-    nextBackgroundRoomRefresh = 0
-    roomsFingerprint = fingerprint
-    rooms = listed.value
-    serverUnavailable = false
-    clearNote(listNote)
-    if (changed) {
-      renderRooms()
-      renderChrome()
-    }
-  } catch (error) {
-    nextBackgroundRoomRefresh = Date.now() + 30_000
-    if (serverUnavailable && !rooms.length) return
-    serverUnavailable = true
-    chat.clearHistory()
-    rooms = []
-    roomsFingerprint = ''
-    clearNote(listNote)
-    renderRooms()
-    renderChrome()
-  } finally {
-    listing = false
-  }
-}
-
 function renderRooms(): void {
-  roomList.replaceChildren()
-  createRoomAction.hidden = serverUnavailable
-  if (!rooms.length) {
-    if (!serverUnavailable) roomList.append(Object.assign(document.createElement('p'), { className: 'muted rail-empty', textContent: '—' }))
-    requestAnimationFrame(syncRailOverflow)
-    return
-  }
-  for (const room of rooms) {
-    const row = document.createElement('div'); row.className = 'room-row'
-    const button = document.createElement('button'); button.type = 'button'; button.className = 'room'
-    if (room.name === currentRoom) button.classList.add('is-active')
-    button.setAttribute('aria-pressed', String(room.name === currentRoom))
-    button.textContent = room.name.slice(0, 1).toUpperCase()
-    button.disabled = joining
-    button.title = room.name
-    button.setAttribute('aria-label', `Join ${room.name}${room.participants ? `, ${room.participants} connected` : ''}`)
-    if (room.sharing) button.append(Object.assign(document.createElement('i'), { className: 'live-dot', ariaLabel: 'Screen sharing' }))
-    button.addEventListener('click', () => void onJoin(room.name))
-    const remove = Object.assign(document.createElement('button'), { type: 'button', className: 'room-delete', textContent: '×', ariaLabel: `Delete ${room.name}` })
-    remove.innerHTML = icon('close')
-    remove.title = `Delete ${room.name}`
-    remove.addEventListener('click', () => requestDelete(room.name))
-    row.append(button, remove); roomList.append(row)
-  }
+  zodiak?.render()
   requestAnimationFrame(syncRailOverflow)
 }
 
@@ -548,48 +444,15 @@ function syncRailOverflow(): void {
   workspaceRail.classList.toggle('has-room-overflow', roomList.scrollHeight > available)
 }
 
-async function onCreateRoom(): Promise<void> {
-  const name = newRoomInput.value.trim()
-  if (!requireName()) return
-  if (!name) return showNote(createNote, 'Enter a room name', 'error')
-  createButton.disabled = true
-  try {
-    const saved = await persistConfig(); if (!saved) return
-    const created = await window.sharescreen.createRoom({ name, displayName: saved.displayName })
-    if (!created.ok) return showNote(createNote, created.error, 'error')
-    newRoomInput.value = ''; createDialog.close(); await refreshRooms(); await onJoin(created.value.name)
-  } catch (error) { showNote(createNote, messageOf(error), 'error')
-  } finally { createButton.disabled = false }
-}
-
-async function onJoin(name: string): Promise<void> {
+/** Joins a voice channel. Until zodiak-media exists, the channel ID is the LiveKit room name. */
+async function onJoin(channelId: string): Promise<void> {
   if (joining) return
-  if (currentRoom === name && connection === 'connected') return
+  if (currentRoom === channelId && connection === 'connected') return
   if (!requireName()) return
   joining = true; renderRooms()
-  try { await connect(name, 'viewer') }
+  try { await connect(channelId, 'viewer') }
   catch (error) { showNote(stageNote, messageOf(error), 'error') }
-  finally { joining = false; renderRooms(); renderChrome() }
-}
-
-function requestDelete(name: string): void {
-  roomPendingDeletion = name
-  clearNote(deleteNote)
-  deleteMessage.textContent = `Delete “${name}”? Everyone will lose this room.`
-  deleteDialog.showModal()
-}
-
-async function onDelete(name: string): Promise<void> {
-  const button = byId('confirm-delete-room', HTMLButtonElement)
-  button.disabled = true
-  try {
-    if (currentRoom === name) await onLeave()
-    const removed = await window.sharescreen.deleteRoom({ name })
-    if (!removed.ok) return showNote(deleteNote, removed.error, 'error')
-    deleteDialog.close()
-    await refreshRooms()
-  } catch (error) { showNote(deleteNote, messageOf(error), 'error')
-  } finally { button.disabled = false }
+  finally { joining = false; zodiak.voiceChanged(); renderChrome() }
 }
 
 async function connect(roomName: string, role: Role): Promise<boolean> {
@@ -641,7 +504,7 @@ async function connect(roomName: string, role: Role): Promise<boolean> {
   chatReady = true
   pendingMessages.forEach((message) => chat.receive(message))
   pendingMessages.length = 0
-  void refreshRooms()
+  zodiak.voiceChanged()
   return true
 }
 
@@ -767,7 +630,7 @@ async function onGoLive(): Promise<void> {
     await publishScreen(audioInput.checked, audioInput.checked && blockDiscordInput.checked, quality)
     const active = await window.sharescreen.setSharing(true)
     if (!active.ok) showNote(stageNote, active.error, 'warn')
-    closePicker(); renderChrome(); void refreshRooms()
+    closePicker(); renderChrome()
   } catch (error) { showNote(pickerNote, messageOf(error), 'error')
     if (audioGuardArmed) await window.sharescreen.setSharing(false)
   } finally { publishing = false; setPickerBusy(false); updatePickerControls() }
@@ -775,7 +638,7 @@ async function onGoLive(): Promise<void> {
 
 async function onStop(): Promise<void> {
   stopButton.disabled = true
-  try { await unpublishScreen(); await window.sharescreen.setSharing(false); hideLocalPreview = false; void refreshRooms()
+  try { await unpublishScreen(); await window.sharescreen.setSharing(false); hideLocalPreview = false
   } catch (error) { showNote(stageNote, messageOf(error), 'error')
   } finally { stopButton.disabled = false; renderChrome() }
 }
@@ -784,7 +647,7 @@ async function onLeave(): Promise<void> {
   leaveButton.disabled = true
   await Promise.allSettled([...participantPreferenceWrites])
   try { await window.sharescreen.setSharing(false); await leaveRoom()
-  } finally { resetRoomState(); closePicker(); clearNote(stageNote); leaveButton.disabled = false; renderChrome(); void refreshRooms() }
+  } finally { resetRoomState(); closePicker(); clearNote(stageNote); leaveButton.disabled = false; zodiak.voiceChanged(); renderChrome() }
 }
 
 function resetRoomState(): void {
@@ -808,9 +671,9 @@ function renderChrome(): void {
   const localStream = streams.find((stream) => stream.local)
   const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
   document.body.classList.toggle('in-room', inRoom)
-  roomSidebar.hidden = !inRoom
+  roomSidebar.hidden = !inRoom && !zodiak?.hasGuild()
   elementById('stage-head').hidden = !inRoom
-  roomTitle.textContent = inRoom ? currentRoom : 'Rooms'
+  roomTitle.textContent = inRoom ? (zodiak?.channelName(currentRoom) ?? 'Voice') : 'Voice'
   stage.classList.toggle('is-idle', !inRoom); shareButton.hidden = !inRoom; labelButton(shareButton, localStream ? 'Change screen' : 'Share screen'); hideMyScreenButton.hidden = !localStream
   shareButton.disabled = connection !== 'connected'
   shareButton.setAttribute('aria-pressed', String(Boolean(localStream)))
@@ -839,14 +702,16 @@ function renderChrome(): void {
   renderTelemetry()
   renderParticipantTiles(inRoom && !useGrid && !selectedStreamId && participants.length > 0)
   if (!inRoom) {
+    const message = !zodiak?.user() ? '' : zodiak.hasGuild() ? 'Select a channel.' : 'Create a server or join one with an invite code.'
     waiting.hidden = false
-    waiting.setAttribute('aria-label', serverUnavailable ? 'Could not connect to the server' : 'Select a room')
-    waitingMessage.hidden = !serverUnavailable
-    waitingMessage.textContent = serverUnavailable ? 'Could not connect to the server.' : ''
+    waiting.setAttribute('aria-label', message || 'Zodiak')
+    waitingMessage.hidden = !message
+    waitingMessage.textContent = message
     membersPanel.hidden = true
     renderRooms()
     return
   }
+  renderRooms()
   waitingMessage.hidden = true
   waiting.hidden = selectedStreamId !== null || participants.length > 0
   if (selectedStreamId === null) waiting.setAttribute('aria-label', hideLocalPreview && localStream ? 'Local preview hidden' : 'No screens')
@@ -1239,7 +1104,7 @@ function syncSensitivity(): void {
 function showInputLevel(level?: import('./noise-gate').InputLevel): void {
   sensitivityMeter.style.setProperty('--level', String(Math.max(0, Math.min(1, (100 + (level?.db ?? -100)) / 100))))
   if (level && autoSensitivityInput.checked) sensitivityInput.parentElement!.style.setProperty('--threshold', String((100 + level.threshold) / 100))
-  sensitivityStatus.value = level ? `${level.db} dB · ${level.open ? 'Passing audio' : 'Gate closed'}` : 'Test your microphone to see the input level'
+  sensitivityStatus.value = level ? `${level.db} dB Ãƒâ€šÃ‚Â· ${level.open ? 'Passing audio' : 'Gate closed'}` : 'Test your microphone to see the input level'
 }
 
 function syncVoiceSettings(): void {
@@ -1363,13 +1228,13 @@ function syncQualityControls(): void {
   fixedBitrateField.hidden = bitrateMode !== 'fixed'
   bitrateValue.value = formatBitrate(bitrate)
   bitrateValue.textContent = bitrateValue.value
-  resolutionInput.title = `${formatBitrate(range.min)}–${formatBitrate(range.max)}`
+  resolutionInput.title = `${formatBitrate(range.min)}ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“${formatBitrate(range.max)}`
   frameRateInput.title = 'Frame rate'
   priorityInput.title = priority === 'framerate'
     ? 'Keeps the selected frame rate by reducing resolution when constrained'
     : 'Keeps image detail by allowing frames to be dropped when constrained'
   bitrateInput.title = `Fixed bitrate: ${formatBitrate(bitrate)}`
-  bitrateModeInput.title = bitrateMode === 'fixed' ? `Fixed target: ${formatBitrate(bitrate)}` : `Adaptive range: ${formatBitrate(range.min)}–${formatBitrate(range.max)}`
+  bitrateModeInput.title = bitrateMode === 'fixed' ? `Fixed target: ${formatBitrate(bitrate)}` : `Adaptive range: ${formatBitrate(range.min)}ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“${formatBitrate(range.max)}`
 }
 
 function syncSystemAudioControls(): void {
@@ -1459,14 +1324,14 @@ function renderTelemetry(): void {
 function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, side: 'host' | 'viewer'): void {
   card.hidden = !metric
   if (!metric) return
-  const quality = metric.width && metric.height ? `${metric.width} × ${metric.height}` : '—'
-  const capture = metric.captureWidth && metric.captureHeight ? `${metric.captureWidth} × ${metric.captureHeight}${metric.captureFrameRate ? ` @ ${Math.round(metric.captureFrameRate)} fps` : ''}` : undefined
+  const quality = metric.width && metric.height ? `${metric.width} ÃƒÆ’Ã¢â‚¬â€ ${metric.height}` : 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'
+  const capture = metric.captureWidth && metric.captureHeight ? `${metric.captureWidth} ÃƒÆ’Ã¢â‚¬â€ ${metric.captureHeight}${metric.captureFrameRate ? ` @ ${Math.round(metric.captureFrameRate)} fps` : ''}` : undefined
   const baseRows: Array<[string, string]> = [
     ['Encoded', quality],
     ...(capture ? [['Capture', capture] as [string, string]] : []),
     ['Bitrate', formatBitrate(metric.bitrate)],
-    ['Frame rate', metric.frameRate ? `${Math.round(metric.frameRate)} fps` : '—'],
-    ['Packet rate', metric.packetRate ? `${Math.round(metric.packetRate)} /s` : '—'],
+    ['Frame rate', metric.frameRate ? `${Math.round(metric.frameRate)} fps` : 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'],
+    ['Packet rate', metric.packetRate ? `${Math.round(metric.packetRate)} /s` : 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'],
     ['Jitter', formatMilliseconds(metric.jitterMs)],
     ['Packet loss', formatPacketLoss(metric)],
     ['Packets', formatCount(metric.packets)],
@@ -1478,16 +1343,16 @@ function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, s
       ['Budget', formatBitrate(metric.maxBitrate)],
       ['Encoder target', formatBitrate(metric.targetBitrate)],
       ['GPU encode', gpuFeatureLabel(captureAccelerationStatus)],
-      ['Encoder', metric.encoder ?? '—'],
-      ['Efficient encode', metric.powerEfficientEncoder === undefined ? '—' : metric.powerEfficientEncoder ? 'Yes' : 'No'],
+      ['Encoder', metric.encoder ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'],
+      ['Efficient encode', metric.powerEfficientEncoder === undefined ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : metric.powerEfficientEncoder ? 'Yes' : 'No'],
       ['Encode', formatMilliseconds(metric.encodeTimeMs)],
       ['Limit', formatLimitation(metric)],
       ['RTT', formatMilliseconds(metric.roundTripTimeMs)],
     ]
     : [
-      ['Codec', metric.codec ?? '—'],
-      ['Decoder', metric.decoder ?? '—'],
-      ['Dropped', metric.framesDropped === undefined ? '—' : formatCount(metric.framesDropped)],
+      ['Codec', metric.codec ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'],
+      ['Decoder', metric.decoder ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'],
+      ['Dropped', metric.framesDropped === undefined ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : formatCount(metric.framesDropped)],
       ['Buffer', formatMilliseconds(metric.jitterBufferDelayMs)],
       ['Decode', formatMilliseconds(metric.decodeTimeMs)],
     ]
@@ -1502,15 +1367,15 @@ function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, s
   }))
 }
 
-function formatMilliseconds(value: number | undefined): string { return value === undefined ? '—' : `${Math.round(value)} ms` }
+function formatMilliseconds(value: number | undefined): string { return value === undefined ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : `${Math.round(value)} ms` }
 function formatPacketLoss(metric: StreamMetric): string {
-  if (metric.packetLossPercent === undefined) return metric.packetsLost === undefined ? '—' : `${formatCount(metric.packetsLost)} lost`
-  return `${metric.packetLossPercent.toFixed(metric.packetLossPercent < 1 ? 2 : 1)}% · ${formatCount(metric.packetsLost ?? 0)} lost`
+  if (metric.packetLossPercent === undefined) return metric.packetsLost === undefined ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : `${formatCount(metric.packetsLost)} lost`
+  return `${metric.packetLossPercent.toFixed(metric.packetLossPercent < 1 ? 2 : 1)}% Ãƒâ€šÃ‚Â· ${formatCount(metric.packetsLost ?? 0)} lost`
 }
 function formatLimitation(metric: StreamMetric): string {
   if (!metric.qualityLimitationReason || metric.qualityLimitationReason === 'none') return 'None'
   const reason = metric.qualityLimitationReason === 'cpu' ? 'CPU / encoder' : metric.qualityLimitationReason
-  return metric.qualityLimitationDurationMs === undefined ? reason : `${reason} · ${formatMilliseconds(metric.qualityLimitationDurationMs)}`
+  return metric.qualityLimitationDurationMs === undefined ? reason : `${reason} Ãƒâ€šÃ‚Â· ${formatMilliseconds(metric.qualityLimitationDurationMs)}`
 }
 function formatCount(value: number): string { return new Intl.NumberFormat().format(Math.round(value)) }
 function formatBytes(value: number): string {
@@ -1521,7 +1386,7 @@ function formatBytes(value: number): string {
 
 
 function formatBitrate(bits: number | undefined): string {
-  if (!bits) return '—'
+  if (!bits) return 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'
   if (bits >= 1_000_000) return `${(bits / 1_000_000).toFixed(1)} Mb/s`
   return `${Math.round(bits / 1_000)} Kb/s`
 }

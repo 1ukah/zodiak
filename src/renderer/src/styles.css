@@ -2519,3 +2519,61 @@ body { --room-footer-height: 61px; }
 .input-sensitivity input::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; margin-top: -4px; border-radius: 50%; background: #eee; box-shadow: 0 0 2px #111; }
 .sensitivity-track.automatic input::-webkit-slider-thumb { visibility: hidden; }
 #voice-gate-status, #voice-sensitivity-help { margin: 0; font-size: 11px; }
+
+/* ---- Zodiak accounts, servers and text channels ---- */
+body.signed-out #shell { display: none; }
+#auth-screen { position: fixed; inset: 32px 0 0; display: grid; place-items: center; background: var(--bg); overflow: auto; }
+.auth-card { width: min(380px, calc(100vw - 48px)); display: flex; flex-direction: column; gap: 14px; padding: 32px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.auth-logo { width: 56px; height: 70px; align-self: center; margin-bottom: 4px; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 9px; background: #111216; }
+.auth-tabs button { padding: 8px; border-radius: 7px; background: transparent; color: var(--muted); font-weight: 600; }
+.auth-tabs button[aria-selected=true] { background: #2a273c; color: #ddd8ff; }
+.auth-hint { margin: -4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+#auth-submit, #auth-retry { width: 100%; justify-content: center; }
+
+body.has-guild #shell { grid-template-columns: 68px 224px minmax(0,1fr); }
+.guild-header { display: flex; align-items: center; gap: 4px; height: 56px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--line); flex: none; }
+.guild-header h2 { flex: 1; min-width: 0; margin: 0; font-size: 14px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guild-header .icon-button { width: 30px; height: 30px; flex: none; }
+.connection-banner { margin: 8px 10px 0; padding: 6px 10px; border-radius: 6px; background: #2b2618; color: var(--warn); font-size: 11px; }
+#channel-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 12px 8px 8px; }
+.channel-heading { padding: 10px 6px 6px 8px; font-size: 9px; letter-spacing: 1.2px; }
+.channel-heading .icon-button { width: 22px; height: 22px; }
+.channel-heading .icon { width: 14px; height: 14px; }
+.channel-row { position: relative; display: flex; align-items: center; border-radius: 6px; }
+.channel { width: 100%; justify-content: flex-start; gap: 7px; padding: 6px 8px; border-radius: 6px; background: transparent; color: #9a9cac; font-size: 13px; text-align: left; }
+.channel .icon { width: 16px; height: 16px; flex: none; color: #6f7181; }
+.channel:hover { background: #202127; color: var(--text); }
+.channel.is-active { background: #2a273c; color: #ddd8ff; }
+.channel.is-connected .icon { color: var(--green); }
+.channel-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-edit { position: absolute; right: 4px; width: 24px; height: 24px; opacity: 0; }
+.channel-edit .icon { width: 14px; height: 14px; }
+.channel-row:hover .channel-edit, .channel-edit:focus-visible { opacity: 1; }
+.channel-row:hover .channel { padding-right: 32px; }
+body.has-guild #members-panel { margin-top: 4px; }
+
+body.view-text #stage-wrap, body.view-text #chat-panel { display: none !important; }
+#text-view { display: none; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+body.view-text #text-view { display: flex; }
+.text-head { height: 56px; padding: 0 20px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); background: #14151a; flex: none; }
+.text-head h1 { margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#text-messages { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 20px 8px; scrollbar-gutter: stable; }
+.text-start { margin: 8px 0 18px; color: var(--muted); font-size: 12px; }
+.text-message { position: relative; border-radius: 6px; margin: 0 -8px; padding: 0 8px; }
+.text-message:hover { background: #ffffff05; }
+.text-message-actions { position: absolute; top: -12px; right: 8px; display: none; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.text-message:hover .text-message-actions, .text-message-actions:focus-within { display: flex; }
+.text-message-actions .icon-button { width: 26px; height: 26px; }
+.text-message-actions .icon { width: 14px; height: 14px; }
+.text-delete:hover { color: var(--danger); }
+.text-edited { color: #6f7181; font-size: 10px; }
+.text-edit { width: 100%; font: inherit; font-size: 13px; line-height: 1.5; resize: vertical; min-height: 40px; padding: 6px 8px; border: 1px solid #70699c; border-radius: 6px; background: #202127; color: var(--text); outline: 0; }
+.text-edit-hint { margin: 2px 0 6px; color: var(--muted); font-size: 10px; }
+#text-form { padding: 8px 20px 18px; flex: none; }
+#text-input { font: inherit; font-size: 13px; line-height: 20px; resize: none; padding: 6px 8px; min-height: 32px; max-height: 200px; width: 100%; min-width: 0; background: transparent; color: var(--text); border: 0; outline: 0; overflow-y: auto; }
+#text-input::placeholder { color: #757786; }
+.dialog-form .create-input-row { margin-top: 6px; }
+.dialog-form .create-input-row input { flex: 1; min-width: 0; }
+.account-actions { justify-content: flex-start; }
+.account-actions .icon { width: 16px; height: 16px; }

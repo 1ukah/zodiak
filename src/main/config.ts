@@ -110,13 +110,18 @@ export function optionalDisplayName(value: unknown): string {
   return requireDisplayName(name)
 }
 
+// The LiveKit connection is optional: only the temporary voice bridge uses it.
+function optionalCredential(value: unknown, label: string): string {
+  return typeof value === 'string' && value.trim() ? requireCredential(value, label) : ''
+}
+
 export function validateConfig(value: unknown): AppConfig {
   if (!isRecord(value)) throw new Error('Invalid settings')
-  const { signalUrl } = resolveServer(stringOr(value.url, ''))
+  const url = stringOr(value.url, '').trim()
   return {
-    url: signalUrl,
-    apiKey: requireCredential(value.apiKey, 'API key'),
-    apiSecret: requireCredential(value.apiSecret, 'API secret'),
+    url: url ? resolveServer(url).signalUrl : '',
+    apiKey: optionalCredential(value.apiKey, 'API key'),
+    apiSecret: optionalCredential(value.apiSecret, 'API secret'),
     displayName: optionalDisplayName(value.displayName),
     showStreamStatistics: value.showStreamStatistics === true,
     checkForUpdatesOnStartup: value.checkForUpdatesOnStartup !== false,

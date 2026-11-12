@@ -9,6 +9,7 @@ import { isRecord } from './parse'
 import { settle } from './result'
 import { getLocalIdentity } from './identity'
 import { flushParticipantPreferences, getParticipantPreferences, saveParticipantPreferences } from './participant-preferences'
+import { registerZodiakIpc, stopZodiak } from './zodiak'
 
 // Electron enables Chromium's GPU pipeline by default. Users can turn it off in
 // Settings > System (applied below, after userData is resolved); the renderer
@@ -417,6 +418,7 @@ app.on('will-quit', () => { tray?.destroy(); tray = null })
 if (primaryInstance) app.whenReady().then(() => {
   registerPermissions()
   registerIpc()
+  registerZodiakIpc()
   createTray()
   const splash = createSplash()
   // Let the small splash paint before loading the main renderer and its modules.
@@ -432,6 +434,7 @@ if (primaryInstance) app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   setSleepBlock(false)
   stopSystemAudio()
+  stopZodiak()
   app.quit()
 })
 
