@@ -82,8 +82,8 @@ async function login(win, username, othersInVoice = 0) {
   await js(`document.querySelector('#auth-form').requestSubmit()`)
   await until('the server', `document.body.classList.contains('has-guild')`)
   await until('the voice channel', `[...document.querySelectorAll('#channel-list .channel')].some(b => b.textContent === 'General')`)
-  if (othersInVoice) await until('the people already in voice', `document.querySelectorAll('.voice-members li').length === ${othersInVoice}`)
-  const before = othersInVoice ? await rowLooks(win, '.voice-members li') : []
+  if (othersInVoice) await until('the people already in voice', `document.querySelectorAll('.voice-members .member').length === ${othersInVoice}`)
+  const before = othersInVoice ? await rowLooks(win, '.voice-members .member') : []
   if (othersInVoice) await sidebarShot(win, 'zodiak-06-voice-row-before-join.png')
   const joinVoice = `[...document.querySelectorAll('#channel-list .channel')].find(b => b.textContent === 'General').click()`
   await js(joinVoice)
@@ -108,7 +108,7 @@ async function login(win, username, othersInVoice = 0) {
 /** Position, size and colors of each person in a sidebar voice list. */
 function rowLooks(win, selector) {
   return win.webContents.executeJavaScript(`[...document.querySelectorAll(${JSON.stringify(selector)})].map(row => {
-    const avatar = row.querySelector('.avatar'), name = row.querySelector('.member-name, .voice-member-name')
+    const avatar = row.querySelector('.avatar'), name = row.querySelector('.member-name')
     const box = (node) => { const r = node.getBoundingClientRect(); return [r.left, r.width, r.height].map(Math.round) }
     return { name: name.textContent, row: box(row), avatar: [...box(avatar), avatar.textContent, getComputedStyle(avatar).backgroundColor],
       text: [Math.round(name.getBoundingClientRect().left), getComputedStyle(name).fontSize] }

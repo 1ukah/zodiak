@@ -2577,26 +2577,15 @@ body.view-text #text-view { display: flex; }
 .dialog-form .create-input-row input { flex: 1; min-width: 0; }
 .account-actions { justify-content: flex-start; }
 .account-actions .icon { width: 16px; height: 16px; }
-.voice-members { list-style: none; margin: 0 0 4px; padding: 0 0 0 30px; }
-.voice-members li { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 3px 4px; color: #b6b7c5; font-size: 12px; }
-.voice-member-avatar.avatar { width: 20px; height: 20px; border-radius: 50%; font-size: 9px; }
-.voice-member-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.voice-member-status { display: inline-flex; margin-left: auto; color: #858995; }
-.voice-member-status .icon { width: 13px; height: 13px; }
-
-/* The voice panel docks under the connected voice channel. */
+/* People in a voice channel use the original voice panel design (.member rows). The panel
+   docks under the connected channel; other channels show the same rows without controls. */
 #members-panel.is-parked { display: none !important; }
-/* It matches .voice-members exactly, so a channel looks the same before and after you join. */
-#channel-list #members-panel { flex: none; max-height: none; margin: 0 0 4px; padding: 0 0 0 30px; border: 0; overflow: visible; }
+#channel-list #members-panel { flex: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: visible; }
 #channel-list #members-panel .members-heading { display: none; }
 #channel-list #members-list { overflow: visible; }
-#channel-list .member { position: relative; gap: 7px; padding: 3px 4px; border-radius: 0; }
-#channel-list .member:hover { background: transparent; }
-#channel-list .member .avatar { width: 20px; height: 20px; border-radius: 50%; font-size: 9px; }
-#channel-list .member-actions, #channel-list .member-actions-local { gap: 0; padding-right: 0; }
-#channel-list .member-voice-status .icon { width: 13px; height: 13px; }
-#channel-list .member .member-voice-mute { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; background: #15161b; }
-#channel-list .member .member-voice-mute .icon { width: 13px; height: 13px; }
+.voice-members, #channel-list #members-list { margin: 2px 0 6px; padding-left: 16px; }
+.member-voice-mute-space { flex: none; width: 22px; height: 24px; }
+#channel-list .member-voice-status { color: #ee7885; }
 
 /* Server members on the right of text channels. */
 .text-head #member-list-toggle { margin-left: auto; flex: none; }
@@ -2608,7 +2597,7 @@ body.members-hidden #member-list { display: none; }
 .member-group { margin: 14px 8px 6px; color: #77788a; font-size: 10px; font-weight: 650; letter-spacing: .8px; text-transform: uppercase; }
 .member-row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 5px 8px; border-radius: 6px; }
 .member-row:hover { background: #202127; }
-.member-row-avatar.avatar { position: relative; width: 30px; height: 30px; border-radius: 50%; font-size: 11px; }
+.member-row-avatar.avatar { position: relative; width: 30px; height: 30px; border-radius: 10px; font-size: 10px; }
 .member-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9cad6; font-size: 13px; }
 .member-row.is-offline { opacity: .45; }
 .presence-dot { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border: 2px solid #15161b; border-radius: 50%; background: #6f7181; }

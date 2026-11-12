@@ -393,19 +393,31 @@ export class ZodiakUi {
   private voiceMembers(snapshot: GuildSnapshot, channel: Channel): void {
     const state = this.store.voice.get(channel.id)
     if (!state?.participants.length) return
-    const list = Object.assign(document.createElement('ul'), { className: 'voice-members' })
+    // Same markup and classes as the voice panel (main.ts renderMembers), so people look the
+    // same before and after you join.
+    const list = Object.assign(document.createElement('div'), { className: 'voice-members' })
+    list.setAttribute('role', 'list')
     list.setAttribute('aria-label', `In ${channel.name}`)
     for (const participant of state.participants) {
-      const item = document.createElement('li')
+      const member = Object.assign(document.createElement('div'), { className: 'member' })
+      member.setAttribute('role', 'listitem')
       const name = this.store.memberName(snapshot.guild.id, participant.user_id) ?? 'Unknown'
-      item.append(makeAvatar(name, 'voice-member-avatar'), Object.assign(document.createElement('span'), { className: 'voice-member-name', textContent: name }))
-      if (participant.streaming) item.append(Object.assign(document.createElement('span'), { className: 'member-live', textContent: 'LIVE' }))
-      if (participant.deafened || participant.muted) {
-        const status = Object.assign(document.createElement('span'), { className: 'voice-member-status', innerHTML: icon(participant.deafened ? 'headphones-off' : 'mic-off') })
-        status.title = participant.deafened ? `${name} is deafened` : `${name} is muted`
-        item.append(status)
+      member.append(makeAvatar(name), Object.assign(document.createElement('span'), { className: 'member-name', textContent: name }))
+      if (participant.streaming) member.append(Object.assign(document.createElement('span'), { className: 'member-live', textContent: 'LIVE' }))
+      const local = participant.user_id === this.store.user?.id
+      const actions = Object.assign(document.createElement('div'), { className: `member-actions${local ? ' member-actions-local' : ''}` })
+      const status = Object.assign(document.createElement('span'), { className: 'member-voice-status' })
+      for (const [show, glyph, label] of [[participant.muted, 'mic-off', 'microphone is muted'], [participant.deafened, 'headphones-off', 'is deafened']] as const) {
+        if (!show) continue
+        const part = Object.assign(document.createElement('span'), { innerHTML: icon(glyph), title: `${name} ${label}` })
+        part.setAttribute('aria-label', part.title)
+        status.append(part)
       }
-      list.append(item)
+      actions.append(status)
+      // Keeps the icons where the per-person volume button sits once you join.
+      if (!local) actions.append(Object.assign(document.createElement('span'), { className: 'member-voice-mute-space' }))
+      member.append(actions)
+      list.append(member)
     }
     this.channelList.append(list)
   }
