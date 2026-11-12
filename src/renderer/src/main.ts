@@ -1061,7 +1061,7 @@ function syncSensitivity(): void {
 function showInputLevel(level?: import('./noise-gate').InputLevel): void {
   sensitivityMeter.style.setProperty('--level', String(Math.max(0, Math.min(1, (100 + (level?.db ?? -100)) / 100))))
   if (level && autoSensitivityInput.checked) sensitivityInput.parentElement!.style.setProperty('--threshold', String((100 + level.threshold) / 100))
-  sensitivityStatus.value = level ? `${level.db} dB ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ${level.open ? 'Passing audio' : 'Gate closed'}` : 'Test your microphone to see the input level'
+  sensitivityStatus.value = level ? `${level.db} dB · ${level.open ? 'Passing audio' : 'Gate closed'}` : 'Test your microphone to see the input level'
 }
 
 function syncVoiceSettings(): void {
@@ -1185,13 +1185,13 @@ function syncQualityControls(): void {
   fixedBitrateField.hidden = bitrateMode !== 'fixed'
   bitrateValue.value = formatBitrate(bitrate)
   bitrateValue.textContent = bitrateValue.value
-  resolutionInput.title = `${formatBitrate(range.min)}ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ${formatBitrate(range.max)}`
+  resolutionInput.title = `${formatBitrate(range.min)}–${formatBitrate(range.max)}`
   frameRateInput.title = 'Frame rate'
   priorityInput.title = priority === 'framerate'
     ? 'Keeps the selected frame rate by reducing resolution when constrained'
     : 'Keeps image detail by allowing frames to be dropped when constrained'
   bitrateInput.title = `Fixed bitrate: ${formatBitrate(bitrate)}`
-  bitrateModeInput.title = bitrateMode === 'fixed' ? `Fixed target: ${formatBitrate(bitrate)}` : `Adaptive range: ${formatBitrate(range.min)}ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ${formatBitrate(range.max)}`
+  bitrateModeInput.title = bitrateMode === 'fixed' ? `Fixed target: ${formatBitrate(bitrate)}` : `Adaptive range: ${formatBitrate(range.min)}–${formatBitrate(range.max)}`
 }
 
 function syncSystemAudioControls(): void {
@@ -1281,14 +1281,14 @@ function renderTelemetry(): void {
 function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, side: 'host' | 'viewer'): void {
   card.hidden = !metric
   if (!metric) return
-  const quality = metric.width && metric.height ? `${metric.width} ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ${metric.height}` : 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'
-  const capture = metric.captureWidth && metric.captureHeight ? `${metric.captureWidth} ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ${metric.captureHeight}${metric.captureFrameRate ? ` @ ${Math.round(metric.captureFrameRate)} fps` : ''}` : undefined
+  const quality = metric.width && metric.height ? `${metric.width} × ${metric.height}` : '—'
+  const capture = metric.captureWidth && metric.captureHeight ? `${metric.captureWidth} × ${metric.captureHeight}${metric.captureFrameRate ? ` @ ${Math.round(metric.captureFrameRate)} fps` : ''}` : undefined
   const baseRows: Array<[string, string]> = [
     ['Encoded', quality],
     ...(capture ? [['Capture', capture] as [string, string]] : []),
     ['Bitrate', formatBitrate(metric.bitrate)],
-    ['Frame rate', metric.frameRate ? `${Math.round(metric.frameRate)} fps` : 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'],
-    ['Packet rate', metric.packetRate ? `${Math.round(metric.packetRate)} /s` : 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'],
+    ['Frame rate', metric.frameRate ? `${Math.round(metric.frameRate)} fps` : '—'],
+    ['Packet rate', metric.packetRate ? `${Math.round(metric.packetRate)} /s` : '—'],
     ['Jitter', formatMilliseconds(metric.jitterMs)],
     ['Packet loss', formatPacketLoss(metric)],
     ['Packets', formatCount(metric.packets)],
@@ -1300,16 +1300,16 @@ function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, s
       ['Budget', formatBitrate(metric.maxBitrate)],
       ['Encoder target', formatBitrate(metric.targetBitrate)],
       ['GPU encode', gpuFeatureLabel(captureAccelerationStatus)],
-      ['Encoder', metric.encoder ?? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'],
-      ['Efficient encode', metric.powerEfficientEncoder === undefined ? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â' : metric.powerEfficientEncoder ? 'Yes' : 'No'],
+      ['Encoder', metric.encoder ?? '—'],
+      ['Efficient encode', metric.powerEfficientEncoder === undefined ? '—' : metric.powerEfficientEncoder ? 'Yes' : 'No'],
       ['Encode', formatMilliseconds(metric.encodeTimeMs)],
       ['Limit', formatLimitation(metric)],
       ['RTT', formatMilliseconds(metric.roundTripTimeMs)],
     ]
     : [
-      ['Codec', metric.codec ?? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'],
-      ['Decoder', metric.decoder ?? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'],
-      ['Dropped', metric.framesDropped === undefined ? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â' : formatCount(metric.framesDropped)],
+      ['Codec', metric.codec ?? '—'],
+      ['Decoder', metric.decoder ?? '—'],
+      ['Dropped', metric.framesDropped === undefined ? '—' : formatCount(metric.framesDropped)],
       ['Buffer', formatMilliseconds(metric.jitterBufferDelayMs)],
       ['Decode', formatMilliseconds(metric.decodeTimeMs)],
     ]
@@ -1324,15 +1324,15 @@ function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, s
   }))
 }
 
-function formatMilliseconds(value: number | undefined): string { return value === undefined ? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â' : `${Math.round(value)} ms` }
+function formatMilliseconds(value: number | undefined): string { return value === undefined ? '—' : `${Math.round(value)} ms` }
 function formatPacketLoss(metric: StreamMetric): string {
-  if (metric.packetLossPercent === undefined) return metric.packetsLost === undefined ? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â' : `${formatCount(metric.packetsLost)} lost`
-  return `${metric.packetLossPercent.toFixed(metric.packetLossPercent < 1 ? 2 : 1)}% ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ${formatCount(metric.packetsLost ?? 0)} lost`
+  if (metric.packetLossPercent === undefined) return metric.packetsLost === undefined ? '—' : `${formatCount(metric.packetsLost)} lost`
+  return `${metric.packetLossPercent.toFixed(metric.packetLossPercent < 1 ? 2 : 1)}% · ${formatCount(metric.packetsLost ?? 0)} lost`
 }
 function formatLimitation(metric: StreamMetric): string {
   if (!metric.qualityLimitationReason || metric.qualityLimitationReason === 'none') return 'None'
   const reason = metric.qualityLimitationReason === 'cpu' ? 'CPU / encoder' : metric.qualityLimitationReason
-  return metric.qualityLimitationDurationMs === undefined ? reason : `${reason} ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ${formatMilliseconds(metric.qualityLimitationDurationMs)}`
+  return metric.qualityLimitationDurationMs === undefined ? reason : `${reason} · ${formatMilliseconds(metric.qualityLimitationDurationMs)}`
 }
 function formatCount(value: number): string { return new Intl.NumberFormat().format(Math.round(value)) }
 function formatBytes(value: number): string {
@@ -1343,7 +1343,7 @@ function formatBytes(value: number): string {
 
 
 function formatBitrate(bits: number | undefined): string {
-  if (!bits) return 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'
+  if (!bits) return '—'
   if (bits >= 1_000_000) return `${(bits / 1_000_000).toFixed(1)} Mb/s`
   return `${Math.round(bits / 1_000)} Kb/s`
 }

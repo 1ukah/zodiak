@@ -110,7 +110,7 @@ function splashMarkup(brandIcon: string): string {
     #status { margin:9px 0 0; color:#898b9b; font-size:10px; text-align:center; }
     @keyframes loading { from { transform:translateX(-120%); } to { transform:translateX(340%); } }
     @media(prefers-reduced-motion:reduce) { .bar { animation:none; width:100%; opacity:.6; } }
-  </style></head><body><main><div class="brand"><img class="mark" src="${brandIcon}" alt="" /></div><div class="track" role="progressbar" aria-label="Loading"><div class="bar"></div></div><p id="status" role="status">Startingâ€¦</p></main>
+  </style></head><body><main><div class="brand"><img class="mark" src="${brandIcon}" alt="" /></div><div class="track" role="progressbar" aria-label="Loading"><div class="bar"></div></div><p id="status" role="status">Starting…</p></main>
   <script>window.setSplashStatus = (message) => { document.getElementById('status').textContent = message }</script></body></html>`
 }
 
@@ -182,8 +182,8 @@ function createWindow(splash: BrowserWindow | null = null): void {
     console.error(preloadPath, error)
   })
 
-  win.webContents.on('did-start-loading', () => updateSplash(splash, 'Loading the interfaceâ€¦'))
-  win.webContents.on('dom-ready', () => updateSplash(splash, 'Preparing screen sharingâ€¦'))
+  win.webContents.on('did-start-loading', () => updateSplash(splash, 'Loading the interface…'))
+  win.webContents.on('dom-ready', () => updateSplash(splash, 'Preparing screen sharing…'))
 
   let painted = false
   let rendererReady = false

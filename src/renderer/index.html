@@ -17,7 +17,7 @@
       <label class="field" for="auth-username">Username<input id="auth-username" type="text" autocomplete="username" maxlength="32" spellcheck="false" required /></label>
       <label class="field" id="auth-display-name-field" for="auth-display-name" hidden>Display name<input id="auth-display-name" type="text" autocomplete="nickname" maxlength="32" placeholder="Optional" /></label>
       <label class="field" for="auth-password">Password<input id="auth-password" type="password" autocomplete="current-password" maxlength="128" required /></label>
-      <p id="auth-hint" class="auth-hint" hidden>2Ã¢â‚¬â€œ32 characters: aÃ¢â‚¬â€œz, 0Ã¢â‚¬â€œ9, _ and . Ã‚Â· Password: 8 or more characters</p>
+      <p id="auth-hint" class="auth-hint" hidden>2–32 characters: a–z, 0–9, _ and . · Password: 8 or more characters</p>
       <p id="auth-note" class="note" role="alert" hidden></p>
       <button id="auth-submit" class="primary" type="submit">Log in</button>
     </form>
@@ -37,7 +37,7 @@
     </nav>
     <aside class="sidebar" id="room-sidebar" hidden>
       <header id="guild-header" class="guild-header"><h2 id="guild-name"></h2><button id="guild-invite" class="icon-button" type="button" title="Invite people" aria-label="Invite people"><span data-icon="invite"></span></button><button id="guild-settings" class="icon-button" type="button" title="Server settings" aria-label="Server settings"><span data-icon="settings"></span></button></header>
-      <p id="connection-banner" class="connection-banner" role="status" hidden>ReconnectingÃ¢â‚¬Â¦</p>
+      <p id="connection-banner" class="connection-banner" role="status" hidden>Reconnecting…</p>
       <nav id="channel-list" aria-label="Channels"></nav>
       <p id="list-note" class="note" role="alert" hidden></p>
       <section id="members-panel" aria-label="Connected people"><div class="members-heading"><span data-icon="people" title="Connected people"></span><span id="members-count"></span><button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button></div><div id="members-list"></div></section>
@@ -50,7 +50,7 @@
       <div id="text-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div>
       <form id="text-form">
         <p id="text-note" class="note" role="alert" hidden></p>
-        <div class="chat-composer"><textarea id="text-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send Ã‚Â· Shift+Enter for a new line"></textarea><button id="text-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div>
+        <div class="chat-composer"><textarea id="text-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="text-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div>
       </form>
     </section>
     <main id="stage-wrap">
