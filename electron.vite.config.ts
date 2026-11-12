@@ -10,6 +10,8 @@ export default defineConfig({
   preload: {
     build: {
       externalizeDeps: true,
+      // Sandboxed renderers need a CommonJS preload.
+      rollupOptions: { output: { format: 'cjs', entryFileNames: '[name].cjs' } },
     },
   },
   renderer: {

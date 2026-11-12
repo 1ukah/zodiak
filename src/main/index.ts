@@ -133,10 +133,10 @@ function createWindow(splash: BrowserWindow | null = null): void {
     title: 'zodiak',
     icon: appIcon(),
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
+      preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       // There is no context menu to apply suggestions, so the spellchecker
       // would only cost memory and per-keystroke work in chat.
       spellcheck: false,
