@@ -128,7 +128,13 @@ export async function loadConfig(): Promise<AppConfig> {
   try {
     const raw = await readFile(configPath(), 'utf8')
     const parsed: unknown = JSON.parse(raw)
-    return normalizeStored(parsed)
+    const config = normalizeStored(parsed)
+    // Versions before 2.0 saved the LiveKit server URL, API key and secret here as plain text.
+    // Rewrite the file without fields this version does not use.
+    if (isRecord(parsed) && Object.keys(parsed).some(key => !(key in config))) {
+      await writeFile(configPath(), JSON.stringify(config, null, 2), 'utf8').catch(() => undefined)
+    }
+    return config
   } catch {
     return { ...DEFAULT_CONFIG }
   }
