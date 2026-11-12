@@ -5,6 +5,7 @@ import { channels, shareBitrateRangeFor, supportsShareQuality, type CaptureAccel
 import { armCapture, listSources, registerCaptureHandler } from './capture'
 import { startSystemAudio, stopSystemAudio } from './system-audio'
 import { hardwareAccelerationEnabledSync, loadConfig, saveConfig } from './config'
+import { removeLegacyData } from './legacy-data'
 import { isRecord } from './parse'
 import { settle } from './result'
 import { flushParticipantPreferences, getParticipantPreferences, saveParticipantPreferences } from './participant-preferences'
@@ -410,6 +411,7 @@ function createTray(): void {
 app.on('will-quit', () => { tray?.destroy(); tray = null })
 
 if (primaryInstance) app.whenReady().then(() => {
+  void removeLegacyData()
   registerPermissions()
   registerIpc()
   registerZodiakIpc()

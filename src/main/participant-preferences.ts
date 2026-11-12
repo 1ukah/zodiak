@@ -75,6 +75,18 @@ export function saveParticipantPreferences(value: unknown): Promise<void> {
   return result
 }
 
+/** Drops the volumes saved for every other server. */
+export function keepOnlyParticipantPreferences(value: unknown): Promise<void> {
+  const key = serverKey(value)
+  const result = writes.then(async () => {
+    const servers = await readPreferences()
+    if (Object.keys(servers).every(server => server === key)) return
+    await writeLocalData('participant-volumes.json', { version: 1, servers: key in servers ? { [key]: servers[key] } : {} })
+  })
+  writes = result.catch(() => undefined)
+  return result
+}
+
 export async function flushParticipantPreferences(): Promise<void> {
   let pending: Promise<unknown>
   do { pending = writes; await pending } while (pending !== writes)

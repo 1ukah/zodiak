@@ -102,6 +102,9 @@ export interface CaptureAccelerationStatus {
 
 export type ActionResult<T> = { ok: true; value: T } | { ok: false; error: string }
 
+/** Participant volumes are saved under this key. Versions before 2.0 used LiveKit server URLs. */
+export const PARTICIPANT_PREFERENCES_SERVER = 'wss://zodiak'
+
 export const channels = {
   rendererReady: 'app:renderer-ready',
   getConfig: 'config:get',

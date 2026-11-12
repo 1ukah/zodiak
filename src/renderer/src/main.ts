@@ -8,7 +8,7 @@ import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, s
 import type { VoiceState } from './voice'
 import type { LoopbackSettings, MicrophoneLoopback } from './microphone-loopback'
 import { setViewerVisible, setVoiceInputLevelReporting } from './session-loader'
-import type { ParticipantPreference, ParticipantPreferenceUpdate } from '../../shared/types'
+import { PARTICIPANT_PREFERENCES_SERVER, type ParticipantPreference, type ParticipantPreferenceUpdate } from '../../shared/types'
 import { initializeUpdateUI } from './update-ui'
 
 hydrateIcons()
@@ -443,7 +443,7 @@ async function onJoin(channelId: string): Promise<void> {
 }
 
 /** Voice preferences (per-user volumes) are kept under one fixed key, by account ID. */
-const PREFERENCES_KEY = 'wss://zodiak'
+const PREFERENCES_KEY = PARTICIPANT_PREFERENCES_SERVER
 
 async function connect(channelId: string): Promise<boolean> {
   const saved = await persistConfig(); if (!saved) return false
