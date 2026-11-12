@@ -126,6 +126,12 @@ async function host(win) {
   })`)
   if (codec && codec.toLowerCase() !== 'video/h264') throw Error(`The screen uses ${codec}, not H.264`)
 
+  await waitFile(path.join(shared, 'guest-watching.json'), 60_000)
+  await http('PATCH', '/v1/users/@me', owner.token, { display_name: 'Host Renamed' })
+  await waitFile(path.join(shared, 'guest-saw-rename.json'), 20_000)
+  await http('DELETE', `/v1/guilds/${guild.guild.id}/members/${guest.user.id}`, owner.token)
+  log('PASS renamed, then removed the guest from the server')
+
   const result = await waitFile(path.join(shared, 'guest-result.json'), 60_000)
   await shot('zodiak-04-voice-host.png')
   const code = await guestDone
@@ -161,6 +167,17 @@ async function guest(win) {
     log('PASS the sidebar shows both people and the LIVE screen')
     await new Promise((resolve) => setTimeout(resolve, 800))
     await shot('zodiak-05-voice-guest.png')
+    await fs.writeFile(path.join(shared, 'guest-watching.json'), '{}')
+
+    await until('the new name in voice', `[...document.querySelectorAll('#members-list .member-name')].some(n => n.textContent === 'Host Renamed')
+      && [...document.querySelectorAll('.voice-members .voice-member-name')].some(n => n.textContent === 'Host Renamed')`, 5_000)
+    log('PASS sees the host\'s new name in voice at once')
+    await fs.writeFile(path.join(shared, 'guest-saw-rename.json'), '{}')
+
+    await until('removal from voice', `!document.body.classList.contains('in-room')`, 5_000)
+    const note = await js(`document.querySelector('#stage-note').textContent`)
+    if (!note.includes('removed')) throw Error(`Unexpected message after removal: ${note}`)
+    log(`PASS was disconnected from voice at once ("${note}")`)
     await fs.writeFile(path.join(shared, 'guest-result.json'), JSON.stringify({ ok: true }))
   } catch (error) {
     await shot('zodiak-05-voice-guest-failure.png').catch(() => undefined)

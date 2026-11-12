@@ -199,7 +199,11 @@ async function boot(): Promise<void> {
   zodiak = new ZodiakUi({
     currentVoiceChannel: () => currentRoom,
     joinVoice: (channel) => onJoin(channel.id),
-    leaveVoice: () => currentRoom ? onLeave() : Promise.resolve(),
+    leaveVoice: async (reason) => {
+      if (!currentRoom) return
+      await onLeave()
+      if (reason) showNote(stageNote, reason, 'warn')
+    },
     layoutChanged: () => renderChrome(),
     userChanged: (user) => syncAccount(user),
   })

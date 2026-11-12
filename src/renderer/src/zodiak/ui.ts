@@ -9,7 +9,8 @@ export interface VoiceBridge {
   /** The voice channel the user is connected to, if any. */
   currentVoiceChannel: () => Id | null
   joinVoice: (channel: Channel) => Promise<void>
-  leaveVoice: () => Promise<void>
+  /** Leaves voice. The reason, when given, is shown to the user. */
+  leaveVoice: (reason?: string) => Promise<void>
   /** The layout changed (server, channel or view). Re-render the rest of the app. */
   layoutChanged: () => void
   /** The account (or its display name) changed. */
@@ -56,6 +57,7 @@ export class ZodiakUi {
   private textChannelId: Id | null = null
   private view: View = 'text'
   private joiningVoice: Id | null = null
+  private lostChannelTimer: number | null = null
   private gatewayState: GatewayState = 'offline'
   private signedIn = false
   private authMode: 'login' | 'register' = 'login'
@@ -243,7 +245,15 @@ export class ZodiakUi {
       this.textChannelId = textChannels.find((c) => c.id === remembered)?.id ?? textChannels[0]?.id ?? null
     }
     const voice = this.bridge.currentVoiceChannel()
-    if (voice && !this.store.channel(voice)) void this.bridge.leaveVoice()
+    if (voice && !this.store.channel(voice) && this.lostChannelTimer === null) {
+      // The media server disconnects removed members itself, with the reason. This is
+      // the fallback if its message does not arrive.
+      this.lostChannelTimer = window.setTimeout(() => {
+        this.lostChannelTimer = null
+        const current = this.bridge.currentVoiceChannel()
+        if (current && !this.store.channel(current)) void this.bridge.leaveVoice('You no longer have access to this voice channel.')
+      }, 2_000)
+    }
     if (this.view === 'voice' && !voice && !this.joiningVoice) this.view = 'text'
     this.text.open(this.isTextView() ? this.textChannelId : null)
   }
