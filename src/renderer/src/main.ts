@@ -16,9 +16,6 @@ const listNote = byId('list-note', HTMLParagraphElement)
 const roomList = elementById('room-list')
 const workspaceRail = document.querySelector<HTMLElement>('.workspace-rail')!
 const nameInput = byId('display-name', HTMLInputElement)
-const urlInput = byId('server-url', HTMLInputElement)
-const keyInput = byId('api-key', HTMLInputElement)
-const secretInput = byId('api-secret', HTMLInputElement)
 const roomTitle = byId('room-title', HTMLHeadingElement)
 const hearButton = byId('hear-audio', HTMLButtonElement)
 const fullscreenButton = byId('fullscreen', HTMLButtonElement)
@@ -108,10 +105,8 @@ let voiceState: VoiceState = { enabled: true, muted: true, deafened: false, busy
 const voiceInputVolume = byId('voice-input-volume', HTMLInputElement)
 const voiceInputVolumeValue = byId('voice-input-volume-value', HTMLOutputElement)
 const settingsDialog = byId('settings-dialog', HTMLDialogElement)
-const serverDialog = byId('server-dialog', HTMLDialogElement)
 const restartDialog = byId('restart-dialog', HTMLDialogElement)
 const settingsNote = byId('settings-note', HTMLParagraphElement)
-const serverNote = byId('server-note', HTMLParagraphElement)
 const roomSidebar = byId('room-sidebar', HTMLElement)
 const participantGrid = elementById('participant-grid')
 let savedConfig: AppConfig | null = null
@@ -271,11 +266,9 @@ function bind(): void {
   })
   document.querySelectorAll<HTMLButtonElement>('[data-settings]').forEach((button) => button.addEventListener('click', () => openSettings()))
   elementById('lobby-settings').addEventListener('click', openSettings)
-  elementById('server-settings').addEventListener('click', openServerSettings)
   document.querySelectorAll<HTMLButtonElement>('[data-close]').forEach((button) => button.addEventListener('click', () => byId(button.dataset.close!, HTMLDialogElement).close()))
   settingsDialog.addEventListener('close', () => { setVoiceInputLevelReporting(false); stopMicrophoneTest(); if (savedConfig) { fillForm(savedConfig); void previewVoiceSettings() } })
   window.addEventListener('pagehide', stopMicrophoneTest)
-  serverDialog.addEventListener('close', () => { if (savedConfig) fillForm(savedConfig) })
   byId('save-settings', HTMLButtonElement).addEventListener('click', async () => {
     const button = byId('save-settings', HTMLButtonElement)
     button.disabled = true
@@ -294,12 +287,6 @@ function bind(): void {
       }
       settingsDialog.close()
     }
-    finally { button.disabled = false }
-  })
-  byId('save-server-settings', HTMLButtonElement).addEventListener('click', async () => {
-    const button = byId('save-server-settings', HTMLButtonElement)
-    button.disabled = true
-    try { if (await persistConfig()) serverDialog.close() }
     finally { button.disabled = false }
   })
   byId('check-for-updates', HTMLButtonElement).addEventListener('click', async () => {
@@ -1362,14 +1349,14 @@ function requireName(): boolean { if (nameInput.value.trim()) return true; openS
 async function persistConfig(): Promise<AppConfig | null> {
   try {
     const saved = await window.sharescreen.saveConfig(readForm())
-    if (!saved.ok) { openServerSettings(); showNote(serverNote, saved.error, 'error'); return null }
+    if (!saved.ok) { showNote(settingsNote, saved.error, 'error'); return null }
     fillForm(saved.value); return saved.value
-  } catch (error) { openServerSettings(); showNote(serverNote, messageOf(error), 'error'); return null }
+  } catch (error) { showNote(settingsNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: 'stable', hardwareAcceleration: hardwareAccelerationInput.checked, showChatBubbles: false, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100, voiceEchoCancellation: echoCancellationInput.checked, voiceAutoGainControl: autoGainControlInput.checked, voiceNoiseGate: noiseGateInput.checked, voiceAutoInputSensitivity: autoSensitivityInput.checked, voiceInputSensitivity: Number(sensitivityInput.value) } }
+function readForm(): AppConfig { return { displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: 'stable', hardwareAcceleration: hardwareAccelerationInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100, voiceEchoCancellation: echoCancellationInput.checked, voiceAutoGainControl: autoGainControlInput.checked, voiceNoiseGate: noiseGateInput.checked, voiceAutoInputSensitivity: autoSensitivityInput.checked, voiceInputSensitivity: Number(sensitivityInput.value) } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
-  urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
+  nameInput.value = config.displayName
   showStatistics = config.showStreamStatistics
   setTelemetryEnabled(showStatistics)
   checkForUpdatesOnStartupInput.checked = config.checkForUpdatesOnStartup
@@ -1420,7 +1407,6 @@ function syncVoiceInputVolume(): void {
   setVoiceInputVolume(value / 100)
   void updateMicrophoneTest()
 }
-function openServerSettings(): void { clearNote(serverNote); if (!serverDialog.open) serverDialog.showModal() }
 function syncScreenControlsVisibility(hasVideo: boolean): void {
   if (!hasVideo) {
     screenControlsVisible = false

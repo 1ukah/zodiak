@@ -1,4 +1,3 @@
-export type Role = 'publisher' | 'viewer'
 export type UpdateChannel = 'stable' | 'beta'
 
 export type UpdateAction = 'download' | 'install' | 'retry' | 'dismiss'
@@ -14,16 +13,12 @@ export interface UpdateState {
 }
 
 export interface AppConfig {
-  url: string
-  apiKey: string
-  apiSecret: string
   displayName: string
   showStreamStatistics: boolean
   checkForUpdatesOnStartup: boolean
   updateChannel: UpdateChannel
   /** Uses the GPU for rendering and video encode/decode; off forces CPU. Applies after a restart. */
   hardwareAcceleration: boolean
-  showChatBubbles: boolean
   voiceEnabled: boolean
   voiceInputDeviceId: string
   voiceInputVolume: number
@@ -36,43 +31,8 @@ export interface AppConfig {
   voiceInputSensitivity: number
 }
 
-export interface RoomSummary {
-  name: string
-  participants: number
-  sharing: boolean
-}
-
-/** Authoritative participant identity and display name from the LiveKit server. */
-export interface RoomParticipantInfo {
-  id: string
-  name: string
-}
-
 export interface ParticipantPreference { name: string; volume: number }
 export interface ParticipantPreferenceUpdate { id: string; name: string; volume?: number }
-
-export interface CreateRoomRequest {
-  name: string
-  displayName: string
-}
-
-export interface RoomNameRequest {
-  name: string
-}
-
-export interface TokenRequest {
-  role: Role
-  displayName: string
-  room: string
-}
-
-export interface TokenResponse {
-  token: string
-  url: string
-  identity: string
-  room: string
-  role: Role
-}
 
 export interface DesktopSourceInfo {
   id: string
@@ -150,13 +110,8 @@ export const channels = {
   getUpdateState: 'update:state:get',
   updateStateChanged: 'update:state:changed',
   updateAction: 'update:action',
-  createToken: 'token:create',
   getParticipantPreferences: 'participants:preferences:get',
   saveParticipantPreferences: 'participants:preferences:save',
-  listRooms: 'rooms:list',
-  listRoomParticipants: 'rooms:list-participants',
-  createRoom: 'rooms:create',
-  deleteRoom: 'rooms:delete',
   listSources: 'sources:list',
   prepareShare: 'share:prepare',
   getCaptureAcceleration: 'share:acceleration',
@@ -179,13 +134,8 @@ export interface SharescreenApi {
   getUpdateState: () => Promise<UpdateState>
   onUpdateStateChanged: (listener: (state: UpdateState) => void) => () => void
   updateAction: (action: UpdateAction) => Promise<ActionResult<true>>
-  createToken: (request: TokenRequest) => Promise<ActionResult<TokenResponse>>
   getParticipantPreferences: (server: string) => Promise<ActionResult<Record<string, ParticipantPreference>>>
   saveParticipantPreferences: (request: { server: string; participants: ParticipantPreferenceUpdate[] }) => Promise<ActionResult<true>>
-  listRooms: () => Promise<ActionResult<RoomSummary[]>>
-  listRoomParticipants: (request: RoomNameRequest) => Promise<ActionResult<RoomParticipantInfo[]>>
-  createRoom: (request: CreateRoomRequest) => Promise<ActionResult<RoomSummary>>
-  deleteRoom: (request: RoomNameRequest) => Promise<ActionResult<true>>
   listSources: () => Promise<ActionResult<DesktopSourceInfo[]>>
   prepareShare: (request: ShareStartRequest) => Promise<ActionResult<true>>
   getCaptureAcceleration: () => Promise<CaptureAccelerationStatus>

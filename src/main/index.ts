@@ -7,7 +7,6 @@ import { startSystemAudio, stopSystemAudio } from './system-audio'
 import { hardwareAccelerationEnabledSync, loadConfig, saveConfig } from './config'
 import { isRecord } from './parse'
 import { settle } from './result'
-import { getLocalIdentity } from './identity'
 import { flushParticipantPreferences, getParticipantPreferences, saveParticipantPreferences } from './participant-preferences'
 import { registerZodiakIpc, stopZodiak } from './zodiak'
 
@@ -111,7 +110,7 @@ function splashMarkup(brandIcon: string): string {
     #status { margin:9px 0 0; color:#898b9b; font-size:10px; text-align:center; }
     @keyframes loading { from { transform:translateX(-120%); } to { transform:translateX(340%); } }
     @media(prefers-reduced-motion:reduce) { .bar { animation:none; width:100%; opacity:.6; } }
-  </style></head><body><main><div class="brand"><img class="mark" src="${brandIcon}" alt="" /></div><div class="track" role="progressbar" aria-label="Loading"><div class="bar"></div></div><p id="status" role="status">Starting…</p></main>
+  </style></head><body><main><div class="brand"><img class="mark" src="${brandIcon}" alt="" /></div><div class="track" role="progressbar" aria-label="Loading"><div class="bar"></div></div><p id="status" role="status">Startingâ€¦</p></main>
   <script>window.setSplashStatus = (message) => { document.getElementById('status').textContent = message }</script></body></html>`
 }
 
@@ -183,8 +182,8 @@ function createWindow(splash: BrowserWindow | null = null): void {
     console.error(preloadPath, error)
   })
 
-  win.webContents.on('did-start-loading', () => updateSplash(splash, 'Loading the interface…'))
-  win.webContents.on('dom-ready', () => updateSplash(splash, 'Preparing screen sharing…'))
+  win.webContents.on('did-start-loading', () => updateSplash(splash, 'Loading the interfaceâ€¦'))
+  win.webContents.on('dom-ready', () => updateSplash(splash, 'Preparing screen sharingâ€¦'))
 
   let painted = false
   let rendererReady = false
@@ -309,7 +308,7 @@ function captureAccelerationStatus(): CaptureAccelerationStatus {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(channels.getConfig, async () => { await getLocalIdentity(); return loadConfig() })
+  ipcMain.handle(channels.getConfig, () => loadConfig())
   ipcMain.handle(channels.getParticipantPreferences, (_event, server: unknown) => settle(() => getParticipantPreferences(server)))
   ipcMain.handle(channels.saveParticipantPreferences, (_event, payload: unknown) => settle(async () => { await saveParticipantPreferences(payload); return true as const }))
   ipcMain.handle(channels.saveConfig, (event, payload: unknown) => settle(async () => {
@@ -330,16 +329,11 @@ function registerIpc(): void {
     await (await loadUpdater()).requestUpdateCheck(true, channel)
     return true as const
   }))
-  ipcMain.handle(channels.createToken, (_event, payload: unknown) => settle(async () => (await import('./tokens')).createParticipantToken(payload)))
   ipcMain.handle(channels.getUpdateState, async () => (await loadUpdater()).getUpdateState())
   ipcMain.handle(channels.updateAction, (_event, action: unknown) => settle(async () => {
     await (await loadUpdater()).performUpdateAction(action)
     return true as const
   }))
-  ipcMain.handle(channels.listRooms, () => settle(async () => (await import('./rooms')).listLiveRooms()))
-  ipcMain.handle(channels.listRoomParticipants, (_event, payload: unknown) => settle(async () => (await import('./rooms')).listLiveRoomParticipants(payload)))
-  ipcMain.handle(channels.createRoom, (_event, payload: unknown) => settle(async () => (await import('./rooms')).createLiveRoom(payload)))
-  ipcMain.handle(channels.deleteRoom, (_event, payload: unknown) => settle(async () => (await import('./rooms')).deleteLiveRoom(payload)))
   ipcMain.handle(channels.listSources, () => settle(() => listSources()))
   ipcMain.handle(channels.prepareShare, (_event, payload: unknown) =>
     settle(async () => {

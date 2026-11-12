@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: https:; font-src 'self'; connect-src 'self' ws: wss: http: https: blob: data:; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:* blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
   <title>zodiak</title><link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
@@ -17,7 +17,7 @@
       <label class="field" for="auth-username">Username<input id="auth-username" type="text" autocomplete="username" maxlength="32" spellcheck="false" required /></label>
       <label class="field" id="auth-display-name-field" for="auth-display-name" hidden>Display name<input id="auth-display-name" type="text" autocomplete="nickname" maxlength="32" placeholder="Optional" /></label>
       <label class="field" for="auth-password">Password<input id="auth-password" type="password" autocomplete="current-password" maxlength="128" required /></label>
-      <p id="auth-hint" class="auth-hint" hidden>2â€“32 characters: aâ€“z, 0â€“9, _ and . Â· Password: 8 or more characters</p>
+      <p id="auth-hint" class="auth-hint" hidden>2Ã¢â‚¬â€œ32 characters: aÃ¢â‚¬â€œz, 0Ã¢â‚¬â€œ9, _ and . Ã‚Â· Password: 8 or more characters</p>
       <p id="auth-note" class="note" role="alert" hidden></p>
       <button id="auth-submit" class="primary" type="submit">Log in</button>
     </form>
@@ -33,12 +33,11 @@
       <button id="create-room-action" class="rail-button rail-create" title="Add a server" aria-label="Add a server"><span data-icon="plus"></span></button>
       <div class="rail-footer">
         <button id="lobby-settings" class="rail-button" title="Settings" aria-label="Settings"><span data-icon="settings"></span></button>
-        <button id="server-settings" class="rail-button rail-server" title="Server connection" aria-label="Server connection"><span data-icon="server"></span></button>
       </div>
     </nav>
     <aside class="sidebar" id="room-sidebar" hidden>
       <header id="guild-header" class="guild-header"><h2 id="guild-name"></h2><button id="guild-invite" class="icon-button" type="button" title="Invite people" aria-label="Invite people"><span data-icon="invite"></span></button><button id="guild-settings" class="icon-button" type="button" title="Server settings" aria-label="Server settings"><span data-icon="settings"></span></button></header>
-      <p id="connection-banner" class="connection-banner" role="status" hidden>Reconnectingâ€¦</p>
+      <p id="connection-banner" class="connection-banner" role="status" hidden>ReconnectingÃ¢â‚¬Â¦</p>
       <nav id="channel-list" aria-label="Channels"></nav>
       <p id="list-note" class="note" role="alert" hidden></p>
       <section id="members-panel" aria-label="Connected people"><div class="members-heading"><span data-icon="people" title="Connected people"></span><span id="members-count"></span><button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button></div><div id="members-list"></div></section>
@@ -51,7 +50,7 @@
       <div id="text-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div>
       <form id="text-form">
         <p id="text-note" class="note" role="alert" hidden></p>
-        <div class="chat-composer"><textarea id="text-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send Â· Shift+Enter for a new line"></textarea><button id="text-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div>
+        <div class="chat-composer"><textarea id="text-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send Ã‚Â· Shift+Enter for a new line"></textarea><button id="text-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div>
       </form>
     </section>
     <main id="stage-wrap">
@@ -182,15 +181,6 @@
         </div>
         <footer class="settings-footer"><p id="settings-note" class="note" role="alert" hidden></p><button id="save-settings" class="primary icon-action" title="Save" aria-label="Save settings"><span data-icon="check"></span></button></footer>
       </div>
-    </div>
-  </dialog>
-  <dialog id="server-dialog" class="dialog server-dialog" aria-label="Server connection">
-    <div class="dialog-content">
-      <div class="dialog-header-actions"><button class="icon-button" data-close="server-dialog" title="Close" aria-label="Close server connection"><span data-icon="close"></span></button></div>
-      <label class="field" for="server-url">URL<input id="server-url" type="text" placeholder="127.0.0.1" title="LiveKit server address, for example 127.0.0.1" spellcheck="false" autocomplete="off" /></label>
-      <label class="field" for="api-key">API key<input id="api-key" type="text" title="LiveKit API key" spellcheck="false" autocomplete="off" /></label>
-      <label class="field" for="api-secret">API secret<input id="api-secret" type="password" title="LiveKit API secret" spellcheck="false" autocomplete="off" /></label>
-      <p id="server-note" class="note" role="alert" hidden></p><div class="actions"><button id="save-server-settings" class="primary icon-action" title="Save server connection" aria-label="Save server connection"><span data-icon="check"></span></button></div>
     </div>
   </dialog>
   <dialog id="confirm-dialog" class="dialog small-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">

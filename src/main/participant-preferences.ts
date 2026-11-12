@@ -1,5 +1,4 @@
 import type { ParticipantPreference, ParticipantPreferenceUpdate } from '../shared/types'
-import { resolveServer } from './config'
 import { readLocalData, writeLocalData } from './local-data'
 import { isRecord } from './parse'
 
@@ -8,9 +7,13 @@ type Preferences = Record<string, Record<string, ParticipantPreference>>
 const MAX_PARTICIPANT_VOLUME = 2
 let writes: Promise<unknown> = Promise.resolve()
 
+/** Preferences are grouped by server, for example `wss://zodiak`. */
 function serverKey(value: unknown): string {
-  if (typeof value !== 'string') throw new Error('Invalid participant preference server')
-  return new URL(resolveServer(value).signalUrl).origin
+  if (typeof value !== 'string' || value.length > 512) throw new Error('Invalid participant preference server')
+  let url: URL
+  try { url = new URL(value) } catch { throw new Error('Invalid participant preference server') }
+  if (url.protocol !== 'ws:' && url.protocol !== 'wss:') throw new Error('Invalid participant preference server')
+  return url.origin
 }
 
 function participantId(value: unknown): string {

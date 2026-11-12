@@ -4,20 +4,19 @@
   <img width="96" height="96" alt="icon" src="https://github.com/user-attachments/assets/6fe87a16-b1f6-4c1d-8511-89a476d38c81" />
 </p>
 
-Zodiak is a Windows app for screen sharing, text chat, and voice chat. Connect to your LiveKit server and use it over the internet or LAN.
+Zodiak is a Windows app for servers, text chat, voice chat and screen sharing. It connects to its own backend, [zodiak-api](https://github.com/1ukah/zodiak-api).
 
 ## Features
 
-- Create and join rooms.
-- Share a screen or window with audio.
+- Create an account, create servers and invite people with a code.
+- Text channels with saved message history.
+- Voice channels with noise suppression.
+- Share a screen or window with audio (H.264, up to 1080p 60 fps).
 - Watch several screen shares at the same time.
-- Use text chat in a room or send private messages.
-- Use voice chat in a room.
 - Exclude Discord audio from your screen share.
 
 ## Setup
 
-- [Run a LiveKit server](docs/livekit.md)
 - [Run from source](docs/run-from-source.md)
 
 ## Screenshot

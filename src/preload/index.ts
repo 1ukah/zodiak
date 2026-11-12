@@ -15,13 +15,8 @@ const api = {
     ipcRenderer.on(channels.updateStateChanged, wrapped)
     return () => ipcRenderer.removeListener(channels.updateStateChanged, wrapped)
   },
-  createToken: (request) => ipcRenderer.invoke(channels.createToken, request),
   getParticipantPreferences: (server) => ipcRenderer.invoke(channels.getParticipantPreferences, server),
   saveParticipantPreferences: (request) => ipcRenderer.invoke(channels.saveParticipantPreferences, request),
-  listRooms: () => ipcRenderer.invoke(channels.listRooms),
-  listRoomParticipants: (request) => ipcRenderer.invoke(channels.listRoomParticipants, request),
-  createRoom: (request) => ipcRenderer.invoke(channels.createRoom, request),
-  deleteRoom: (request) => ipcRenderer.invoke(channels.deleteRoom, request),
   listSources: () => ipcRenderer.invoke(channels.listSources),
   prepareShare: (request) => ipcRenderer.invoke(channels.prepareShare, request),
   getCaptureAcceleration: () => ipcRenderer.invoke(channels.getCaptureAcceleration),
