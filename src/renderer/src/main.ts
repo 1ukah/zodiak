@@ -2,6 +2,7 @@ import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type Captur
 import type { User } from '../../shared/protocol'
 import { ZodiakUi } from './zodiak/ui'
 import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, setTelemetryEnabled, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session-loader'
+import { avatarHue, initials, makeAvatar } from './avatar'
 import { hydrateIcons, icon, labelButton, setButtonIcon } from './icons'
 import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, setVoiceParticipantMuted, setVoiceParticipantVolume, setMicrophoneTestActive } from './session-loader'
 import type { VoiceState } from './voice'
@@ -1444,9 +1445,6 @@ function setTheater(active: boolean): void {
   elementById('exit-focus').hidden = !active
   if (active) revealScreenControls()
 }
-function initials(name: string): string { return name.trim().split(/\s+/).slice(0, 2).map((part) => [...part][0] ?? '').join('').toUpperCase() || '?' }
-function avatarHue(name: string): number { return [...name].reduce((hash, character) => (hash * 31 + character.charCodeAt(0)) % 360, 252) }
-function makeAvatar(name: string): HTMLSpanElement { const avatar = Object.assign(document.createElement('span'), { className: 'avatar', textContent: initials(name) }); avatar.style.setProperty('--avatar-hue', String(avatarHue(name))); avatar.setAttribute('aria-hidden', 'true'); return avatar }
 function renderParticipantTiles(active: boolean): void {
   participantGrid.hidden = !active
   if (!active) return

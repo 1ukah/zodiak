@@ -1,5 +1,6 @@
 import type { Channel, ChannelKind, GuildSnapshot, Invite, Id, User } from '../../../shared/protocol'
 import type { GatewayState } from '../../../shared/zodiak'
+import { makeAvatar } from '../avatar'
 import { icon, labelButton } from '../icons'
 import { api, errorText } from './api'
 import { ZodiakStore } from './store'
@@ -321,8 +322,10 @@ export class ZodiakUi {
         const row = Object.assign(document.createElement('div'), { className: `member-row${online ? '' : ' is-offline'}` })
         row.title = `@${member.user.username}`
         const name = member.user.display_name
-        const avatar = Object.assign(document.createElement('span'), { className: 'avatar member-row-avatar', textContent: [...name][0]?.toUpperCase() ?? '?' })
+        const avatar = makeAvatar(name, 'member-row-avatar')
         avatar.append(Object.assign(document.createElement('i'), { className: `presence-dot${online ? ' is-online' : ''}` }))
+        avatar.removeAttribute('aria-hidden')
+        avatar.setAttribute('role', 'img')
         avatar.setAttribute('aria-label', online ? 'Online' : 'Offline')
         row.append(avatar, Object.assign(document.createElement('span'), { className: 'member-row-name', textContent: name }))
         if (member.user.id === snapshot.guild.owner_id) row.append(Object.assign(document.createElement('span'), { className: 'member-owner', textContent: 'Owner' }))
@@ -395,8 +398,7 @@ export class ZodiakUi {
     for (const participant of state.participants) {
       const item = document.createElement('li')
       const name = this.store.memberName(snapshot.guild.id, participant.user_id) ?? 'Unknown'
-      const avatar = Object.assign(document.createElement('span'), { className: 'avatar voice-member-avatar', textContent: [...name][0]?.toUpperCase() ?? '?' })
-      item.append(avatar, Object.assign(document.createElement('span'), { className: 'voice-member-name', textContent: name }))
+      item.append(makeAvatar(name, 'voice-member-avatar'), Object.assign(document.createElement('span'), { className: 'voice-member-name', textContent: name }))
       if (participant.streaming) item.append(Object.assign(document.createElement('span'), { className: 'member-live', textContent: 'LIVE' }))
       if (participant.deafened || participant.muted) {
         const status = Object.assign(document.createElement('span'), { className: 'voice-member-status', innerHTML: icon(participant.deafened ? 'headphones-off' : 'mic-off') })

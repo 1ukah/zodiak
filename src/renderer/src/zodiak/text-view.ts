@@ -1,4 +1,5 @@
 import type { Id, Message } from '../../../shared/protocol'
+import { makeAvatar } from '../avatar'
 import { icon, labelButton } from '../icons'
 import { api, errorText } from './api'
 import type { ZodiakStore } from './store'
@@ -35,15 +36,6 @@ export function linkify(text: string): Node[] {
   return nodes
 }
 
-function initials(name: string): string {
-  return [...name.trim()].slice(0, 1).join('').toUpperCase() || '?'
-}
-
-function hue(name: string): number {
-  let value = 0
-  for (const char of name) value = (value * 31 + char.codePointAt(0)!) % 360
-  return value
-}
 
 const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
 const day = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -164,8 +156,7 @@ export class TextChannelView {
       const grouped = body && previous && previous.author.id === message.author.id && at.getTime() - new Date(previous.created_at).getTime() < GROUP_MS
       if (!grouped) {
         const group = Object.assign(document.createElement('article'), { className: 'chat-message-group' })
-        const avatar = Object.assign(document.createElement('span'), { className: 'avatar chat-avatar', textContent: initials(message.author.display_name) })
-        avatar.style.setProperty('--avatar-hue', String(hue(message.author.display_name)))
+        const avatar = makeAvatar(message.author.display_name, 'chat-avatar')
         body = Object.assign(document.createElement('div'), { className: 'chat-message-body' })
         const head = Object.assign(document.createElement('header'), { className: 'chat-message-head' })
         head.append(

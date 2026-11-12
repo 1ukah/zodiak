@@ -2578,19 +2578,25 @@ body.view-text #text-view { display: flex; }
 .account-actions { justify-content: flex-start; }
 .account-actions .icon { width: 16px; height: 16px; }
 .voice-members { list-style: none; margin: 0 0 4px; padding: 0 0 0 30px; }
-.voice-members li { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 3px 4px; color: #9a9cac; font-size: 12px; }
+.voice-members li { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 3px 4px; color: #b6b7c5; font-size: 12px; }
 .voice-member-avatar.avatar { width: 20px; height: 20px; border-radius: 50%; font-size: 9px; }
-.voice-member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.voice-member-status { display: inline-flex; color: #ee7885; }
+.voice-member-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-member-status { display: inline-flex; margin-left: auto; color: #858995; }
 .voice-member-status .icon { width: 13px; height: 13px; }
 
 /* The voice panel docks under the connected voice channel. */
 #members-panel.is-parked { display: none !important; }
-#channel-list #members-panel { flex: none; max-height: none; margin: 0 0 4px; padding: 0 0 0 22px; border: 0; overflow: visible; }
+/* It matches .voice-members exactly, so a channel looks the same before and after you join. */
+#channel-list #members-panel { flex: none; max-height: none; margin: 0 0 4px; padding: 0 0 0 30px; border: 0; overflow: visible; }
 #channel-list #members-panel .members-heading { display: none; }
 #channel-list #members-list { overflow: visible; }
-#channel-list .member { padding: 4px 4px; }
-#channel-list .member .avatar { width: 22px; height: 22px; border-radius: 50%; font-size: 9px; }
+#channel-list .member { position: relative; gap: 7px; padding: 3px 4px; border-radius: 0; }
+#channel-list .member:hover { background: transparent; }
+#channel-list .member .avatar { width: 20px; height: 20px; border-radius: 50%; font-size: 9px; }
+#channel-list .member-actions, #channel-list .member-actions-local { gap: 0; padding-right: 0; }
+#channel-list .member-voice-status .icon { width: 13px; height: 13px; }
+#channel-list .member .member-voice-mute { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; background: #15161b; }
+#channel-list .member .member-voice-mute .icon { width: 13px; height: 13px; }
 
 /* Server members on the right of text channels. */
 .text-head #member-list-toggle { margin-left: auto; flex: none; }

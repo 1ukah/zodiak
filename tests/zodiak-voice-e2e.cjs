@@ -73,7 +73,7 @@ function helpers(win) {
   return { js, until, type, click, recordPeers, inbound }
 }
 
-async function login(win, username) {
+async function login(win, username, othersInVoice = 0) {
   const { until, type, js, recordPeers } = helpers(win)
   await until('the login screen', `document.body.classList.contains('signed-out')`)
   await recordPeers()
@@ -82,6 +82,9 @@ async function login(win, username) {
   await js(`document.querySelector('#auth-form').requestSubmit()`)
   await until('the server', `document.body.classList.contains('has-guild')`)
   await until('the voice channel', `[...document.querySelectorAll('#channel-list .channel')].some(b => b.textContent === 'General')`)
+  if (othersInVoice) await until('the people already in voice', `document.querySelectorAll('.voice-members li').length === ${othersInVoice}`)
+  const before = othersInVoice ? await rowLooks(win, '.voice-members li') : []
+  if (othersInVoice) await sidebarShot(win, 'zodiak-06-voice-row-before-join.png')
   const joinVoice = `[...document.querySelectorAll('#channel-list .channel')].find(b => b.textContent === 'General').click()`
   await js(joinVoice)
   try {
@@ -91,6 +94,30 @@ async function login(win, username) {
       peers: (window.__pcs || []).map(pc => [pc.connectionState, pc.iceConnectionState, pc.signalingState, pc.localDescription?.type, pc.remoteDescription?.type]) })`)
     throw Error(`${error.message}: ${state}`)
   }
+  if (!othersInVoice) return
+  await until('the voice panel under the channel', `document.querySelectorAll('#channel-list #members-panel .member').length === ${othersInVoice + 1}`)
+  await sidebarShot(win, 'zodiak-07-voice-row-after-join.png')
+  const after = await rowLooks(win, '#channel-list #members-panel .member')
+  for (const row of before) {
+    const same = after.find((other) => other.name === row.name)
+    if (JSON.stringify(same) !== JSON.stringify(row)) throw Error(`${row.name} looks different after joining:\n  before ${JSON.stringify(row)}\n  after  ${JSON.stringify(same)}`)
+  }
+  log('PASS people in the voice channel look the same before and after joining')
+}
+
+/** Position, size and colors of each person in a sidebar voice list. */
+function rowLooks(win, selector) {
+  return win.webContents.executeJavaScript(`[...document.querySelectorAll(${JSON.stringify(selector)})].map(row => {
+    const avatar = row.querySelector('.avatar'), name = row.querySelector('.member-name, .voice-member-name')
+    const box = (node) => { const r = node.getBoundingClientRect(); return [r.left, r.width, r.height].map(Math.round) }
+    return { name: name.textContent, row: box(row), avatar: [...box(avatar), avatar.textContent, getComputedStyle(avatar).backgroundColor],
+      text: [Math.round(name.getBoundingClientRect().left), getComputedStyle(name).fontSize] }
+  })`)
+}
+
+async function sidebarShot(win, name) {
+  const image = await win.webContents.capturePage({ x: 68, y: 88, width: 224, height: 240 })
+  await fs.writeFile(path.join(output, name), image.toPNG())
 }
 
 async function host(win) {
@@ -146,7 +173,7 @@ async function guest(win) {
   const shot = async (name) => fs.writeFile(path.join(output, name), (await win.webContents.capturePage()).toPNG())
   const setup = await waitFile(path.join(shared, 'setup.json'))
   try {
-    await login(win, setup.guest)
+    await login(win, setup.guest, 1)
     await until('both people in voice', `document.querySelectorAll('#members-list .member').length === 2`, 15_000)
     await until('the voice stage', `!document.body.classList.contains('view-text') && getComputedStyle(document.querySelector('#stage-wrap')).display !== 'none'`, 5_000)
     log('PASS joined voice and sees the host on the voice stage')
