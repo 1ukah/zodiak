@@ -55,6 +55,7 @@ export class ZodiakUi {
   private guildId: Id | null = null
   private textChannelId: Id | null = null
   private view: View = 'text'
+  private joiningVoice: Id | null = null
   private gatewayState: GatewayState = 'offline'
   private signedIn = false
   private authMode: 'login' | 'register' = 'login'
@@ -125,7 +126,7 @@ export class ZodiakUi {
 
   /** Called when a voice connection starts or ends. */
   voiceChanged(): void {
-    if (!this.bridge.currentVoiceChannel() && this.view === 'voice') this.view = 'text'
+    if (!this.bridge.currentVoiceChannel() && !this.joiningVoice && this.view === 'voice') this.view = 'text'
     this.render()
   }
 
@@ -243,7 +244,7 @@ export class ZodiakUi {
     }
     const voice = this.bridge.currentVoiceChannel()
     if (voice && !this.store.channel(voice)) void this.bridge.leaveVoice()
-    if (this.view === 'voice' && !voice) this.view = 'text'
+    if (this.view === 'voice' && !voice && !this.joiningVoice) this.view = 'text'
     this.text.open(this.isTextView() ? this.textChannelId : null)
   }
 
@@ -268,9 +269,10 @@ export class ZodiakUi {
       this.view = 'voice'
     } else {
       this.view = 'voice'
+      this.joiningVoice = channel.id
       this.render()
       this.bridge.layoutChanged()
-      await this.bridge.joinVoice(channel)
+      try { await this.bridge.joinVoice(channel) } finally { this.joiningVoice = null }
       if (this.bridge.currentVoiceChannel() !== channel.id) this.view = 'text'
     }
     this.text.open(this.isTextView() ? this.textChannelId : null)
@@ -325,8 +327,33 @@ export class ZodiakUi {
         heading.append(add)
       }
       this.channelList.append(heading)
-      for (const channel of channels) this.channelList.append(this.channelRow(snapshot, channel, owner))
+      for (const channel of channels) {
+        this.channelList.append(this.channelRow(snapshot, channel, owner))
+        if (channel.kind === 'voice') this.voiceMembers(snapshot, channel)
+      }
     }
+  }
+
+  /** The people connected to a voice channel, under its row. */
+  private voiceMembers(snapshot: GuildSnapshot, channel: Channel): void {
+    const state = this.store.voice.get(channel.id)
+    if (!state?.participants.length) return
+    const list = Object.assign(document.createElement('ul'), { className: 'voice-members' })
+    list.setAttribute('aria-label', `In ${channel.name}`)
+    for (const participant of state.participants) {
+      const item = document.createElement('li')
+      const name = this.store.memberName(snapshot.guild.id, participant.user_id) ?? 'Unknown'
+      const avatar = Object.assign(document.createElement('span'), { className: 'avatar voice-member-avatar', textContent: [...name][0]?.toUpperCase() ?? '?' })
+      item.append(avatar, Object.assign(document.createElement('span'), { className: 'voice-member-name', textContent: name }))
+      if (participant.streaming) item.append(Object.assign(document.createElement('span'), { className: 'member-live', textContent: 'LIVE' }))
+      if (participant.deafened || participant.muted) {
+        const status = Object.assign(document.createElement('span'), { className: 'voice-member-status', innerHTML: icon(participant.deafened ? 'headphones-off' : 'mic-off') })
+        status.title = participant.deafened ? `${name} is deafened` : `${name} is muted`
+        item.append(status)
+      }
+      list.append(item)
+    }
+    this.channelList.append(list)
   }
 
   private channelRow(snapshot: GuildSnapshot, channel: Channel, owner: boolean): HTMLElement {

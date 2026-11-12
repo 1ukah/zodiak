@@ -1,4 +1,3 @@
-import { Track } from 'livekit-client'
 import { MicrophoneProcessor } from './microphone-processor'
 import type { NoiseGateSettings, InputLevel } from './noise-gate'
 
@@ -65,7 +64,7 @@ export class MicrophoneLoopback {
       stream, context, processor: new MicrophoneProcessor(context, this.settings!.inputVolume, this.settings!.suppressionStrength ?? .8, this.settings!, this.onLevel),
     }
     this.current = state
-    await state.processor.init({ kind: Track.Kind.Audio, track: stream.getAudioTracks()[0], audioContext: context })
+    await state.processor.init({ track: stream.getAudioTracks()[0] })
     if (generation !== this.generation) return
     const source = context.createMediaStreamSource(new MediaStream([state.processor.processedTrack!]))
     const gain = context.createGain()

@@ -2577,3 +2577,9 @@ body.view-text #text-view { display: flex; }
 .dialog-form .create-input-row input { flex: 1; min-width: 0; }
 .account-actions { justify-content: flex-start; }
 .account-actions .icon { width: 16px; height: 16px; }
+.voice-members { list-style: none; margin: 0 0 4px; padding: 0 0 0 30px; }
+.voice-members li { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 3px 4px; color: #9a9cac; font-size: 12px; }
+.voice-member-avatar.avatar { width: 20px; height: 20px; border-radius: 50%; font-size: 9px; }
+.voice-member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-member-status { display: inline-flex; color: #ee7885; }
+.voice-member-status .icon { width: 13px; height: 13px; }

@@ -17,7 +17,7 @@
       <label class="field" for="auth-username">Username<input id="auth-username" type="text" autocomplete="username" maxlength="32" spellcheck="false" required /></label>
       <label class="field" id="auth-display-name-field" for="auth-display-name" hidden>Display name<input id="auth-display-name" type="text" autocomplete="nickname" maxlength="32" placeholder="Optional" /></label>
       <label class="field" for="auth-password">Password<input id="auth-password" type="password" autocomplete="current-password" maxlength="128" required /></label>
-      <p id="auth-hint" class="auth-hint" hidden>2–32 characters: a–z, 0–9, _ and . · Password: 8 or more characters</p>
+      <p id="auth-hint" class="auth-hint" hidden>2â€“32 characters: aâ€“z, 0â€“9, _ and . Â· Password: 8 or more characters</p>
       <p id="auth-note" class="note" role="alert" hidden></p>
       <button id="auth-submit" class="primary" type="submit">Log in</button>
     </form>
@@ -38,7 +38,7 @@
     </nav>
     <aside class="sidebar" id="room-sidebar" hidden>
       <header id="guild-header" class="guild-header"><h2 id="guild-name"></h2><button id="guild-invite" class="icon-button" type="button" title="Invite people" aria-label="Invite people"><span data-icon="invite"></span></button><button id="guild-settings" class="icon-button" type="button" title="Server settings" aria-label="Server settings"><span data-icon="settings"></span></button></header>
-      <p id="connection-banner" class="connection-banner" role="status" hidden>Reconnecting…</p>
+      <p id="connection-banner" class="connection-banner" role="status" hidden>Reconnectingâ€¦</p>
       <nav id="channel-list" aria-label="Channels"></nav>
       <p id="list-note" class="note" role="alert" hidden></p>
       <section id="members-panel" aria-label="Connected people"><div class="members-heading"><span data-icon="people" title="Connected people"></span><span id="members-count"></span><button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button></div><div id="members-list"></div></section>
@@ -51,7 +51,7 @@
       <div id="text-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div>
       <form id="text-form">
         <p id="text-note" class="note" role="alert" hidden></p>
-        <div class="chat-composer"><textarea id="text-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="text-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div>
+        <div class="chat-composer"><textarea id="text-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send Â· Shift+Enter for a new line"></textarea><button id="text-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div>
       </form>
     </section>
     <main id="stage-wrap">
@@ -60,7 +60,6 @@
         <div class="header-actions">
           <button id="pop-out" class="icon-button" type="button" title="Pop out" aria-label="Pop out" hidden><span data-icon="popout"></span></button>
           <button id="fullscreen" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button>
-          <button id="chat-toggle" class="icon-button chat-toggle" type="button" title="Show chat" aria-label="Show chat" aria-controls="chat-panel" aria-expanded="false" hidden><span data-icon="chat"></span><span class="chat-badge" hidden></span></button>
         </div>
       </header>
       <div id="stage" class="is-idle">
@@ -70,7 +69,7 @@
         <p id="stage-note" class="note" role="alert" data-dismissible hidden></p><aside id="stream-metrics" aria-label="Stream statistics" hidden><section id="host-metrics" class="metric-card" hidden><header><strong>Host</strong><span>Sending</span></header><dl></dl></section><section id="viewer-metrics" class="metric-card" hidden><header><strong>Viewer</strong><span>Receiving</span></header><dl></dl></section></aside>
       </div>
       <button id="exit-focus" class="icon-button" title="Exit focus (Esc)" aria-label="Exit focus" hidden><span data-icon="focus"></span></button>
-      <div id="focus-view-controls" aria-label="Stream controls"><button id="fullscreen-focus" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button><button id="chat-focus-toggle" class="icon-button chat-toggle" type="button" title="Show chat" aria-label="Show chat" aria-controls="chat-panel" hidden><span data-icon="chat"></span><span class="chat-badge" hidden></span></button></div>
+      <div id="focus-view-controls" aria-label="Stream controls"><button id="fullscreen-focus" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button></div>
       <footer id="call-controls" hidden>
         <div class="call-actions">
           <button id="voice-focus-mute" class="control-button voice-control voice-focus-control" type="button" title="Unmute microphone" aria-label="Unmute microphone" aria-pressed="true"><span data-icon="mic-off"></span></button>
@@ -83,15 +82,8 @@
         </div>
       </footer>
     </main>
-    <aside id="chat-panel" aria-label="Room chat" hidden>
-      <header class="chat-header"><div id="chat-tabs" role="tablist" aria-label="Conversations"></div><button id="chat-hide" class="icon-button" type="button" title="Hide chat" aria-label="Hide chat"><span data-icon="close"></span></button></header>
-      <div class="chat-history"><div id="chat-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div><button id="chat-jump" class="control-button" type="button" title="Jump to new messages" aria-label="Jump to new messages" hidden><span data-icon="down"></span><span class="chat-badge" hidden></span></button></div>
-      <form id="chat-form"><p id="chat-error" class="note" role="alert" hidden></p><div id="chat-attachment" aria-label="Images to send" hidden></div><input id="chat-file" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,image/avif" aria-label="Choose up to 10 images" hidden /><div class="chat-composer"><button id="chat-attach" class="icon-button" type="button" title="Attach image" aria-label="Attach image"><span data-icon="attach"></span></button><textarea id="chat-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="chat-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div></form>
-    </aside>
     </div>
   </div>
-  <div id="chat-bubbles" aria-label="Chat previews"></div>
-  <dialog id="chat-image-dialog" aria-label="Shared image" tabindex="-1"><button id="chat-image-previous" class="icon-button chat-image-nav" type="button" title="Previous image" aria-label="Previous image" hidden><span data-icon="previous"></span></button><img id="chat-image-full" alt="Shared image" /><button id="chat-image-next" class="icon-button chat-image-nav" type="button" title="Next image" aria-label="Next image" hidden><span data-icon="next"></span></button><div id="chat-image-sequence" role="group" aria-label="Images in this message" hidden></div><span id="chat-image-position" class="sr-only" role="status" aria-live="polite"></span></dialog>
   <dialog id="guild-dialog" class="dialog small-dialog" aria-labelledby="guild-dialog-title">
     <div class="dialog-content">
       <div class="panel-head"><h2 id="guild-dialog-title">Add a server</h2><button class="icon-button" type="button" data-close="guild-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
@@ -175,7 +167,6 @@
           </section>
           <section id="settings-panel-interface" role="tabpanel" aria-labelledby="settings-tab-interface" tabindex="0" hidden>
             <label class="check" for="show-stream-statistics"><span>Stream statistics</span><input id="show-stream-statistics" type="checkbox" role="switch" title="Show host and viewer stream statistics" /></label>
-            <label class="check" for="show-chat-bubbles"><span>Show chat bubbles</span><input id="show-chat-bubbles" type="checkbox" role="switch" title="Preview messages while chat is hidden" /></label>
           </section>
           <section id="settings-panel-system" role="tabpanel" aria-labelledby="settings-tab-system" tabindex="0" hidden>
             <!-- Beta is paused; every build follows Stable. Restore with the #update-channel code in main.ts.
@@ -221,7 +212,7 @@
       <div class="dialog-header-actions"><button id="refresh-sources" class="icon-button" type="button" title="Refresh sources" aria-label="Refresh sources"><span data-icon="refresh"></span></button><button id="cancel-share" class="icon-button" type="button" title="Close" aria-label="Cancel sharing"><span data-icon="close"></span></button></div>
       <div id="sources"></div>
       <div class="picker-foot">
-        <div class="quality-grid"><label class="field" for="share-resolution">Resolution<select id="share-resolution"><option value="480p">480p</option><option value="720p">720p</option><option value="1080p" selected>1080p</option><option value="1440p">1440p</option></select></label><label class="field" for="share-framerate">FPS<select id="share-framerate"><option value="5">5</option><option value="15">15</option><option value="24">24</option><option value="30">30</option><option value="60" selected>60</option><option value="120">120</option></select></label><label class="field" for="share-priority">Prioritize<select id="share-priority" title="Keeps the selected frame rate by reducing resolution when constrained"><option value="quality">Quality</option><option value="framerate" selected>Framerate</option></select></label><div class="bitrate-controls"><label class="field" for="share-bitrate-mode">Bitrate<select id="share-bitrate-mode"><option value="dynamic" selected>Dynamic</option><option value="fixed">Fixed</option></select></label><label id="fixed-bitrate-field" class="field fixed-bitrate-field" for="share-bitrate" hidden><span>Target <output id="share-bitrate-value" for="share-bitrate"></output></span><input id="share-bitrate" type="range" step="100000" /></label></div></div>
+        <div class="quality-grid"><label class="field" for="share-resolution">Resolution<select id="share-resolution"><option value="480p">480p</option><option value="720p">720p</option><option value="1080p" selected>1080p</option></select></label><label class="field" for="share-framerate">FPS<select id="share-framerate"><option value="30">30</option><option value="60" selected>60</option></select></label><label class="field" for="share-priority">Prioritize<select id="share-priority" title="Keeps the selected frame rate by reducing resolution when constrained"><option value="quality">Quality</option><option value="framerate" selected>Framerate</option></select></label><div class="bitrate-controls"><label class="field" for="share-bitrate-mode">Bitrate<select id="share-bitrate-mode"><option value="dynamic" selected>Dynamic</option><option value="fixed">Fixed</option></select></label><label id="fixed-bitrate-field" class="field fixed-bitrate-field" for="share-bitrate" hidden><span>Target <output id="share-bitrate-value" for="share-bitrate"></output></span><input id="share-bitrate" type="range" step="100000" /></label></div></div>
         <label class="check" for="system-audio"><span>System audio</span><input id="system-audio" type="checkbox" role="switch" checked /></label>
         <label class="check" for="block-discord-audio"><span>Exclude Discord</span><input id="block-discord-audio" type="checkbox" role="switch" checked /></label>
         <p id="picker-note" class="note" role="alert" hidden></p><div class="actions"><button id="go-live" class="primary icon-action" type="submit" title="Start sharing" aria-label="Start sharing" disabled><span data-icon="share"></span></button></div>

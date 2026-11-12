@@ -11,9 +11,10 @@ import type { Message } from "./Message";
 import type { MessageDelete } from "./MessageDelete";
 import type { Ready } from "./Ready";
 import type { User } from "./User";
+import type { VoiceChannelState } from "./VoiceChannelState";
 
 export type GatewayServerFrame = { "op": "hello", d: Hello, } | { "op": "heartbeat_ack" } | { "op": "dispatch", 
 /**
  * Sequence number. It starts at 1 for each connection.
  */
-s: number, } & ({ "t": "READY", "d": Ready } | { "t": "USER_UPDATE", "d": User } | { "t": "GUILD_CREATE", "d": GuildSnapshot } | { "t": "GUILD_UPDATE", "d": Guild } | { "t": "GUILD_DELETE", "d": GuildDelete } | { "t": "CHANNEL_CREATE", "d": Channel } | { "t": "CHANNEL_UPDATE", "d": Channel } | { "t": "CHANNEL_DELETE", "d": ChannelDelete } | { "t": "MEMBER_ADD", "d": MemberAdd } | { "t": "MEMBER_REMOVE", "d": MemberRemove } | { "t": "MESSAGE_CREATE", "d": Message } | { "t": "MESSAGE_UPDATE", "d": Message } | { "t": "MESSAGE_DELETE", "d": MessageDelete }) | { "op": "invalid_session" };
+s: number, } & ({ "t": "READY", "d": Ready } | { "t": "USER_UPDATE", "d": User } | { "t": "GUILD_CREATE", "d": GuildSnapshot } | { "t": "GUILD_UPDATE", "d": Guild } | { "t": "GUILD_DELETE", "d": GuildDelete } | { "t": "CHANNEL_CREATE", "d": Channel } | { "t": "CHANNEL_UPDATE", "d": Channel } | { "t": "CHANNEL_DELETE", "d": ChannelDelete } | { "t": "MEMBER_ADD", "d": MemberAdd } | { "t": "MEMBER_REMOVE", "d": MemberRemove } | { "t": "MESSAGE_CREATE", "d": Message } | { "t": "MESSAGE_UPDATE", "d": Message } | { "t": "MESSAGE_DELETE", "d": MessageDelete } | { "t": "VOICE_STATE_UPDATE", "d": VoiceChannelState }) | { "op": "invalid_session" };

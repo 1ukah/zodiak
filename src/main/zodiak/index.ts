@@ -3,6 +3,7 @@ import type { AuthResponse, User } from '../../shared/protocol'
 import { zodiakChannels, type ApiResult, type SessionState } from '../../shared/zodiak'
 import { Gateway } from './gateway'
 import { call, UNREACHABLE } from './http'
+import { MediaSignal } from './media'
 import { parseApiRequest } from './request-guard'
 import { clearToken, loadToken, saveToken } from './token-store'
 
@@ -29,6 +30,7 @@ function startGateway(): void {
 }
 
 async function endSession(notify: boolean): Promise<void> {
+  closeMedia()
   gateway?.stop()
   gateway = null
   token = null
@@ -84,6 +86,7 @@ async function logout(everywhere: boolean): Promise<void> {
 }
 
 export function registerZodiakIpc(): void {
+  registerMediaIpc()
   ipcMain.handle(zodiakChannels.session, () => {
     restoring ??= restore().finally(() => { restoring = null })
     return restoring
@@ -103,7 +106,37 @@ export function registerZodiakIpc(): void {
   })
 }
 
+let media: MediaSignal | null = null
+
+function closeMedia(): void {
+  media?.close()
+  media = null
+}
+
 export function stopZodiak(): void {
+  closeMedia()
   gateway?.stop()
   gateway = null
+}
+
+export function registerMediaIpc(): void {
+  ipcMain.handle(zodiakChannels.mediaConnect, async (_event, channelId: unknown): Promise<ApiResult<true>> => {
+    closeMedia()
+    if (!token) return { ok: false, status: 401, error: 'Not logged in.' }
+    if (typeof channelId !== 'string') return { ok: false, status: 0, error: 'Invalid channel' }
+    const signal = new MediaSignal({
+      onFrame: (frame) => { if (media === signal) broadcast(zodiakChannels.mediaFrame, frame) },
+      onClosed: (reason) => {
+        if (media !== signal) return
+        media = null
+        broadcast(zodiakChannels.mediaClosed, reason)
+      },
+    })
+    media = signal
+    const result = await signal.connect(channelId, token)
+    if (!result.ok && media === signal) closeMedia()
+    return result
+  })
+  ipcMain.on(zodiakChannels.mediaSend, (_event, frame: unknown) => media?.sendFromRenderer(frame))
+  ipcMain.handle(zodiakChannels.mediaDisconnect, () => closeMedia())
 }

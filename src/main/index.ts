@@ -280,11 +280,11 @@ function parseShareRequest(value: unknown): ShareStartRequest {
 }
 
 function isResolution(value: unknown): value is ShareResolution {
-  return value === '480p' || value === '720p' || value === '1080p' || value === '1440p'
+  return value === '480p' || value === '720p' || value === '1080p'
 }
 
 function isFrameRate(value: unknown): value is ShareFrameRate {
-  return value === 5 || value === 15 || value === 24 || value === 30 || value === 60 || value === 120
+  return value === 30 || value === 60
 }
 
 function isBitrateMode(value: unknown): value is ShareBitrateMode {

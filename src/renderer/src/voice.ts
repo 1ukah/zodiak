@@ -1,4 +1,5 @@
-import { ConnectionState, Room, RoomEvent, Track, type Participant } from 'livekit-client'
+import type { MediaParticipant } from '../../shared/protocol'
+import type { MediaConnection, RemoteTrack } from './media/connection'
 import { MicrophoneProcessor } from './microphone-processor'
 import type { NoiseGateSettings, InputLevel } from './noise-gate'
 import { voiceActiveUntil } from './voice-activity'
@@ -26,7 +27,7 @@ export interface VoiceState {
 export interface VoiceSettings extends NoiseGateSettings { enabled: boolean; inputDeviceId: string; inputVolume?: number; noiseSuppression?: boolean; suppressionStrength?: number; echoCancellation?: boolean; autoGainControl?: boolean; participantVolumes?: Record<string, number> }
 
 interface VoicePlayback {
-  track: Track
+  track: MediaStreamTrack
   element: HTMLAudioElement
   receiver: HTMLAudioElement
   source: MediaStreamAudioSourceNode
@@ -35,15 +36,19 @@ interface VoicePlayback {
 }
 
 interface Meter {
-  track: Track
-  mediaTrack: MediaStreamTrack
+  track: MediaStreamTrack
   source: GainNode
   analyser: AnalyserNode
   samples: Float32Array<ArrayBuffer>
   activeUntil: number
 }
 
-/** Room microphones have their own subscriptions, playback, and mute state. */
+interface Capture {
+  stream: MediaStream
+  processor: MicrophoneProcessor
+}
+
+/** Voice for one voice channel: microphone capture and sending, and playback of the others. */
 export class RoomVoice {
   private enabled: boolean
   private inputDeviceId: string
@@ -56,13 +61,15 @@ export class RoomVoice {
   private outputDeviceId = 'default'
   private outputVolume = 1
   private inputVolume: number
-  private inputGain: MicrophoneProcessor | null = null
   private noiseSuppression: boolean
   private suppressionStrength: number
   private echoCancellation: boolean
   private autoGainControl: boolean
   private gateSettings: NoiseGateSettings
   private inputContext: AudioContext | null = null
+  private capture: Capture | null = null
+  private remote = new Map<string, MediaParticipant>()
+  private remoteMicrophones = new Map<string, MediaStreamTrack>()
   private audio = new Map<string, VoicePlayback>()
   private mutedIds = new Set<string>()
   private participantVolumes = new Map<string, number>()
@@ -73,10 +80,9 @@ export class RoomVoice {
   private visible = true
   private reportInputLevel = false
   private signature = ''
-  private unsubscribe: () => void
 
   /** `playbackContext` lets the session share one output graph (and audio thread) with screen audio. */
-  constructor(private room: Room, private rack: HTMLElement, settings: VoiceSettings,
+  constructor(private connection: MediaConnection, private rack: HTMLElement, settings: VoiceSettings,
     private onState: (state: VoiceState) => void, private onBlocked: (blocked: boolean) => void,
     private playbackContext?: () => AudioContext) {
     this.enabled = settings.enabled
@@ -90,26 +96,22 @@ export class RoomVoice {
     for (const [id, volume] of Object.entries(settings.participantVolumes ?? {})) {
       if (Number.isFinite(volume)) this.participantVolumes.set(id, Math.max(0, Math.min(MAX_PLAYBACK_VOLUME, volume)))
     }
-    const sync = () => this.sync()
-    const reconnect = () => { void this.run(() => this.reconcile()).catch(() => { this.muted = true; this.emit() }) }
-    room.on(RoomEvent.TrackSubscribed, sync).on(RoomEvent.TrackUnsubscribed, sync)
-      .on(RoomEvent.TrackPublished, sync).on(RoomEvent.TrackUnpublished, sync)
-      .on(RoomEvent.TrackMuted, sync).on(RoomEvent.TrackUnmuted, sync)
-      .on(RoomEvent.LocalTrackPublished, sync).on(RoomEvent.LocalTrackUnpublished, sync)
-      .on(RoomEvent.ParticipantConnected, sync).on(RoomEvent.ParticipantDisconnected, sync)
-      .on(RoomEvent.ParticipantAttributesChanged, sync).on(RoomEvent.Reconnected, reconnect)
-    this.unsubscribe = () => {
-      room.off(RoomEvent.TrackSubscribed, sync).off(RoomEvent.TrackUnsubscribed, sync)
-        .off(RoomEvent.TrackPublished, sync).off(RoomEvent.TrackUnpublished, sync)
-        .off(RoomEvent.TrackMuted, sync).off(RoomEvent.TrackUnmuted, sync)
-        .off(RoomEvent.LocalTrackPublished, sync).off(RoomEvent.LocalTrackUnpublished, sync)
-        .off(RoomEvent.ParticipantConnected, sync).off(RoomEvent.ParticipantDisconnected, sync)
-        .off(RoomEvent.ParticipantAttributesChanged, sync).off(RoomEvent.Reconnected, reconnect)
-    }
     this.startMeters()
   }
 
   async start(): Promise<void> { await this.run(() => this.reconcile()) }
+
+  /** Participants from the media server, including this user. */
+  setParticipants(participants: MediaParticipant[]): void {
+    this.remote = new Map(participants.filter(p => p.user_id !== this.connection.userId).map(p => [p.user_id, p]))
+    for (const id of this.mutedIds) if (!this.remote.has(id)) this.mutedIds.delete(id)
+    this.sync()
+  }
+
+  setTracks(tracks: RemoteTrack[]): void {
+    this.remoteMicrophones = new Map(tracks.filter(t => t.source === 'microphone').map(t => [t.userId, t.track]))
+    this.sync()
+  }
 
   /** Speaking indicators are not visible while minimized; stop polling the analysers. */
   setVisible(visible: boolean): void {
@@ -139,46 +141,28 @@ export class RoomVoice {
     for (const key of ['noiseGate', 'autoInputSensitivity', 'inputSensitivity'] as const) {
       if (settings[key] !== undefined) Object.assign(this.gateSettings, { [key]: settings[key] })
     }
-    this.inputGain?.setNoiseGate(this.gateSettings)
+    this.capture?.processor.setNoiseGate(this.gateSettings)
     if (settings.suppressionStrength !== undefined) this.suppressionStrength = settings.suppressionStrength
-    this.inputGain?.setSuppressionStrength(this.suppressionStrength)
+    this.capture?.processor.setSuppressionStrength(this.suppressionStrength)
     if (settings.noiseSuppression !== undefined) this.noiseSuppression = settings.noiseSuppression
-    if (!settings.enabled || !this.noiseSuppression) this.inputGain?.disableNoiseSuppression()
+    if (settings.inputVolume !== undefined) this.setInputVolume(settings.inputVolume)
     // Disable immediately, even while a device permission request is pending.
     if (!settings.enabled) {
       this.enabled = false
       this.muted = true
       this.deafened = false
-      this.silenceMicrophone()
       this.sync()
     }
     await this.run(async () => {
       const echo = settings.echoCancellation ?? this.echoCancellation
       const agc = settings.autoGainControl ?? this.autoGainControl
-      if (echo !== this.echoCancellation || agc !== this.autoGainControl) {
-        const track = this.microphone()?.track as import('livekit-client').LocalAudioTrack | undefined
-        if (track && !track.isMuted && settings.enabled) {
-          await track.restartTrack({ deviceId: settings.inputDeviceId, channelCount: 1, sampleRate: 48000,
-            echoCancellation: echo, autoGainControl: agc, noiseSuppression: false })
-        }
-        // Muted tracks are reacquired by LiveKit using their stored constraints.
-        else if (track) await this.room.localParticipant.unpublishTrack(track, true)
-        this.echoCancellation = echo
-        this.autoGainControl = agc
-      }
-      const previousDevice = this.inputDeviceId
-      if (settings.enabled && settings.inputDeviceId !== previousDevice && this.microphone()?.track) {
-        try {
-          if (!await this.room.switchActiveDevice('audioinput', settings.inputDeviceId)) throw new Error('The device did not switch.')
-        }
-        catch (error) {
-          await this.room.switchActiveDevice('audioinput', previousDevice).catch(() => undefined)
-          throw new Error(`Could not use that microphone: ${error instanceof Error ? error.message : String(error)}`)
-        }
-      }
+      const restart = echo !== this.echoCancellation || agc !== this.autoGainControl || settings.inputDeviceId !== this.inputDeviceId
+      this.echoCancellation = echo
+      this.autoGainControl = agc
       this.inputDeviceId = settings.inputDeviceId
-      if (settings.inputVolume !== undefined) this.setInputVolume(settings.inputVolume)
       this.enabled = settings.enabled
+      if (restart && this.capture) await this.stopCapture()
+      else if (this.capture) await this.capture.processor.setNoiseSuppression(this.noiseSuppression)
       await this.reconcile()
     })
   }
@@ -187,7 +171,6 @@ export class RoomVoice {
     if (!this.enabled || this.testing) return
     if (!muted) this.deafened = false
     this.muted = muted
-    if (muted) this.silenceMicrophone()
     this.sync()
     await this.run(() => this.reconcile())
   }
@@ -195,20 +178,19 @@ export class RoomVoice {
   async setDeafened(deafened: boolean): Promise<void> {
     if (!this.enabled || this.testing) return
     this.deafened = deafened
-    if (deafened) this.silenceMicrophone()
     this.sync()
     await this.run(() => this.reconcile())
   }
 
   setParticipantMuted(id: string, muted: boolean): void {
-    if (!this.room.remoteParticipants.has(id)) return
+    if (!this.remote.has(id)) return
     if (muted) this.mutedIds.add(id)
     else this.mutedIds.delete(id)
     this.sync()
   }
 
   setParticipantVolume(id: string, volume: number): void {
-    if (!Number.isFinite(volume) || !this.room.remoteParticipants.has(id)) return
+    if (!Number.isFinite(volume) || !this.remote.has(id)) return
     this.participantVolumes.set(id, Math.max(0, Math.min(MAX_PLAYBACK_VOLUME, volume)))
     const entry = this.audio.get(id)
     if (entry) entry.gain.set(this.playbackVolume(id))
@@ -219,11 +201,10 @@ export class RoomVoice {
     return this.mutedIds.has(id) ? 0 : playbackGain(this.outputVolume) * playbackGain(this.participantVolumes.get(id) ?? 1)
   }
 
-  /** Suspend room voice without changing the user's mute preferences. */
+  /** Suspend voice without changing the user's mute preferences. */
   async setTesting(active: boolean): Promise<void> {
     if (this.testing === active) return
     this.testing = active
-    if (active) this.silenceMicrophone()
     this.sync()
     await this.run(() => this.reconcile())
   }
@@ -231,7 +212,7 @@ export class RoomVoice {
   setInputVolume(volume: number): void {
     if (!Number.isFinite(volume)) return
     this.inputVolume = Math.max(0, Math.min(1, volume))
-    this.inputGain?.setVolume(this.inputVolume)
+    this.capture?.processor.setVolume(this.inputVolume)
     this.emit()
   }
 
@@ -262,10 +243,8 @@ export class RoomVoice {
 
   close(): void {
     this.closed = true
-    this.silenceMicrophone()
-    this.microphone()?.track?.stop()
     this.stopMeters()
-    this.unsubscribe()
+    void this.stopCapture()
     for (const id of this.audio.keys()) this.removeAudio(id)
     for (const id of this.meters.keys()) this.removeMeter(id)
     // A shared playback context belongs to the session, which closes it.
@@ -276,12 +255,8 @@ export class RoomVoice {
     this.onBlocked(false)
   }
 
-  private microphone() { return this.room.localParticipant.getTrackPublication(Track.Source.Microphone) }
-
-  private silenceMicrophone(): void {
-    this.inputGain?.disableNoiseSuppression()
-    const track = this.microphone()?.track
-    if (track) track.mediaStreamTrack.enabled = false
+  private sending(): boolean {
+    return this.enabled && !this.muted && !this.deafened && !this.testing && !this.closed
   }
 
   private async run(action: () => Promise<void>): Promise<void> {
@@ -293,120 +268,86 @@ export class RoomVoice {
     finally { this.pending--; this.sync() }
   }
 
+  private async stopCapture(): Promise<void> {
+    const capture = this.capture
+    this.capture = null
+    if (!capture) return
+    await this.connection.setMicrophone(null).catch(() => undefined)
+    capture.stream.getTracks().forEach(track => track.stop())
+    await capture.processor.destroy()
+  }
+
   private async reconcile(): Promise<void> {
-    if (this.closed || this.room.state !== ConnectionState.Connected) return
+    if (this.closed) return
     try {
-      const shouldPublish = this.enabled && !this.muted && !this.deafened && !this.testing
-      if (!this.enabled) {
-        const track = this.microphone()?.track
-        if (track) await this.room.localParticipant.unpublishTrack(track, true)
-      } else if (shouldPublish) {
-        const publication = this.microphone()
-        if (publication?.track) {
-          await publication.track.unmute()
-          await this.inputGain?.setNoiseSuppression(this.noiseSuppression && this.enabled && !this.muted && !this.deafened && !this.testing && !this.closed)
-          // A quick mute/unmute can cancel the queued mute after we silenced
-          // the processed track. The SDK only toggles its original input track.
-          publication.track.mediaStreamTrack.enabled = true
-        }
-        else {
-          const [track] = await this.room.localParticipant.createTracks({ audio: {
-            // RNNoise owns suppression. Capture processing is independently configurable.
-            deviceId: this.inputDeviceId, channelCount: 1, sampleRate: 48000,
-            echoCancellation: this.echoCancellation, noiseSuppression: false, autoGainControl: this.autoGainControl,
-          } })
-          try {
-            // Do not publish a late capture after the user muted or left.
-            if (this.closed || !this.enabled || this.muted || this.deafened || this.testing) { track.stop(); return }
-            // Keep synchronous RNNoise initialization/processing off the incoming
-            // voice graph to reduce playback stalls during filter restarts.
-            this.inputContext ??= new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
-            this.inputGain = new MicrophoneProcessor(this.inputContext, this.inputVolume, this.suppressionStrength, this.gateSettings)
-            if (track.kind !== Track.Kind.Audio) throw new Error('The selected input is not a microphone.')
-            const audioTrack = track as import('livekit-client').LocalAudioTrack
-            audioTrack.setAudioContext(this.inputContext)
-            await audioTrack.setProcessor(this.inputGain)
-            await this.inputGain.setNoiseSuppression(this.noiseSuppression && this.enabled && !this.muted && !this.deafened && !this.testing && !this.closed)
-            if (this.closed || !this.enabled || this.muted || this.deafened || this.testing) { track.stop(); return }
-            await this.room.localParticipant.publishTrack(audioTrack, { source: Track.Source.Microphone, stopMicTrackOnMute: true })
-          } catch (error) { track.stop(); throw error }
-        }
-      } else {
-        await this.microphone()?.track?.mute()
+      if (this.sending() && !this.capture) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+          // RNNoise owns suppression. Capture processing is independently configurable.
+          ...(this.inputDeviceId && this.inputDeviceId !== 'default' ? { deviceId: { exact: this.inputDeviceId } } : {}),
+          channelCount: 1, sampleRate: 48000,
+          echoCancellation: this.echoCancellation, noiseSuppression: false, autoGainControl: this.autoGainControl,
+        } })
+        // Do not send a late capture after the user muted or left.
+        if (!this.sending()) { stream.getTracks().forEach(track => track.stop()); return }
+        this.inputContext ??= new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
+        const processor = new MicrophoneProcessor(this.inputContext, this.inputVolume, this.suppressionStrength, this.gateSettings)
+        try {
+          const [input] = stream.getAudioTracks()
+          if (!input) throw new Error('The selected input is not a microphone.')
+          await processor.init({ track: input })
+          await processor.setNoiseSuppression(this.noiseSuppression)
+        } catch (error) { stream.getTracks().forEach(track => track.stop()); await processor.destroy(); throw error }
+        if (!this.sending()) { stream.getTracks().forEach(track => track.stop()); await processor.destroy(); return }
+        this.capture = { stream, processor }
+        await this.connection.setMicrophone(processor.processedTrack ?? null)
+      } else if (!this.sending() && this.capture) {
+        await this.stopCapture()
       }
-      // Capture can resolve after leaving, disabling voice, or deafening.
-      if (this.closed || !this.enabled || this.muted || this.deafened || this.testing) {
-        this.silenceMicrophone()
-        if (this.closed || !this.enabled) this.microphone()?.track?.stop()
-        else await this.microphone()?.track?.mute()
-      }
-      if (this.closed) return
     } catch (error) {
       this.muted = true
-      this.silenceMicrophone()
-      this.microphone()?.track?.stop()
-      const failedTrack = this.microphone()?.track
-      if (failedTrack) await this.room.localParticipant.unpublishTrack(failedTrack, true).catch(() => undefined)
-      await this.publishStatus().catch(() => undefined)
+      await this.stopCapture()
+      this.publishStatus()
       throw new Error(`Microphone unavailable: ${error instanceof Error ? error.message : String(error)}`)
     }
-    await this.publishStatus()
+    this.publishStatus()
     this.sync()
   }
 
-  private async publishStatus(): Promise<void> {
-    if (this.closed || this.room.state !== ConnectionState.Connected) return
-    await this.room.localParticipant.setAttributes({
-      'zodiak.voice.enabled': String(this.enabled),
-      'zodiak.voice.deafened': String(this.deafened || this.testing),
-    })
+  private publishStatus(): void {
+    if (this.closed) return
+    this.connection.sendState(!this.capture, this.deafened || this.testing, this.enabled)
   }
 
   private sync(): void {
     if (this.closed) return
     const receiving = this.enabled && !this.deafened && !this.testing
-    const wantedAudio = new Set<string>()
-    const wantedMeters = new Map<string, Track>()
-    this.room.remoteParticipants.forEach(participant => {
-      const publication = participant.getTrackPublication(Track.Source.Microphone)
-      if (publication && publication.isDesired !== receiving) publication.setSubscribed(receiving)
-      const track = publication?.track
-      if (receiving && track) {
-        wantedAudio.add(participant.identity)
-        this.attachAudio(participant.identity, track)
-        if (!publication.isMuted) wantedMeters.set(participant.identity, track)
-      }
-    })
-    for (const id of this.audio.keys()) if (!wantedAudio.has(id)) this.removeAudio(id)
-    for (const id of this.meters.keys()) if (!wantedMeters.has(id)) this.removeMeter(id)
-    for (const [id, track] of wantedMeters) this.addMeter(id, track)
-    for (const id of this.mutedIds) if (!this.room.remoteParticipants.has(id)) this.mutedIds.delete(id)
+    const wanted = receiving ? this.remoteMicrophones : new Map<string, MediaStreamTrack>()
+    for (const id of this.audio.keys()) if (!wanted.has(id)) this.removeAudio(id)
+    for (const [id, track] of wanted) this.attachAudio(id, track)
+    for (const id of this.meters.keys()) if (!wanted.has(id) || this.remote.get(id)?.muted) this.removeMeter(id)
+    for (const [id, track] of wanted) if (!this.remote.get(id)?.muted) this.addMeter(id, track)
     if (!this.audio.size) this.onBlocked(false)
     this.emit()
   }
 
-  private attachAudio(id: string, track: Track): void {
+  private attachAudio(id: string, track: MediaStreamTrack): void {
     let entry = this.audio.get(id)
     if (entry?.track !== track) {
       this.removeAudio(id)
       const element = document.createElement('audio')
       element.autoplay = true
-      element.muted = this.mutedIds.has(id)
       // Keep a muted receiver attached so Chromium continues decoding incoming
       // WebRTC audio while the gain graph feeds the selected output device.
-      const stream = new MediaStream([track.mediaStreamTrack])
+      const stream = new MediaStream([track])
       const receiver = document.createElement('audio')
       receiver.muted = true
       receiver.volume = 0
       receiver.autoplay = true
-      // LiveKit's attach() unmutes audio elements and can create its own output
-      // graph. Assign the stream directly so only the processed element is heard.
       receiver.srcObject = stream
       this.context ??= this.playbackContext?.() ?? new AudioContext({ sampleRate: 48000 })
       const source = this.context.createMediaStreamSource(stream)
       const destination = this.context.createMediaStreamDestination()
       const gain = new PlaybackGain(this.context, destination)
-      gain.set(this.playbackVolume(id))
       source.connect(gain.node)
       element.srcObject = destination.stream
       this.rack.append(element)
@@ -442,17 +383,17 @@ export class RoomVoice {
     this.audio.delete(id)
   }
 
-  private addMeter(id: string, track: Track): void {
+  private addMeter(id: string, track: MediaStreamTrack): void {
     const source = this.audio.get(id)?.gain.node
     if (!source) return
     const previous = this.meters.get(id)
-    if (previous?.track === track && previous.mediaTrack === track.mediaStreamTrack && previous.source === source) return
+    if (previous?.track === track && previous.source === source) return
     this.removeMeter(id)
     try {
       const analyser = source.context.createAnalyser()
       analyser.fftSize = 1024
       source.connect(analyser)
-      this.meters.set(id, { track, mediaTrack: track.mediaStreamTrack, source, analyser, samples: new Float32Array(1024), activeUntil: 0 })
+      this.meters.set(id, { track, source, analyser, samples: new Float32Array(1024), activeUntil: 0 })
     } catch { /* Playback remains available if metering is unavailable. */ }
   }
 
@@ -465,44 +406,44 @@ export class RoomVoice {
     this.meters.delete(id)
   }
 
-  private participantState(participant: Participant, local: boolean): VoiceParticipant {
-    const publication = participant.getTrackPublication(Track.Source.Microphone)
-    const enabled = local ? this.enabled : participant.attributes['zodiak.voice.enabled'] === 'true' ||
-      (participant.attributes['zodiak.voice.enabled'] !== 'false' && Boolean(publication))
-    const deafened = local ? this.deafened || this.testing : participant.attributes['zodiak.voice.deafened'] === 'true'
-    const muted = !enabled || deafened || !publication || publication.isMuted || (local && this.muted)
-    const locallyMuted = this.mutedIds.has(participant.identity)
-    const volume = this.participantVolumes.get(participant.identity) ?? 1
-    let speaking = false
-    const meter = this.meters.get(participant.identity)
+  private localState(): VoiceParticipant {
     const now = performance.now()
-    const active = !muted && this.enabled && !this.deafened && !this.testing && this.room.state === ConnectionState.Connected
-    if (local) {
-      // Reading the processor's final gain survives SDK capture/processor
-      // restarts and follows the same samples that reach the outgoing track.
-      const rms = active ? this.inputGain?.getOutputRms() ?? 0 : 0
-      this.localActiveUntil = voiceActiveUntil(rms, this.localActiveUntil, now)
-      speaking = this.localActiveUntil > now
-    } else if (meter) {
+    const active = this.enabled && !this.muted && !this.deafened && !this.testing && Boolean(this.capture)
+    const rms = active ? this.capture?.processor.getOutputRms() ?? 0 : 0
+    this.localActiveUntil = voiceActiveUntil(rms, this.localActiveUntil, now)
+    return {
+      id: this.connection.userId, enabled: this.enabled, muted: !active, deafened: this.deafened || this.testing,
+      locallyMuted: false, volume: 1, speaking: this.localActiveUntil > now,
+    }
+  }
+
+  private remoteState(participant: MediaParticipant): VoiceParticipant {
+    const id = participant.user_id
+    const enabled = participant.voice_enabled
+    const muted = !enabled || participant.deafened || participant.muted || !this.remoteMicrophones.has(id)
+    const locallyMuted = this.mutedIds.has(id)
+    let speaking = false
+    const meter = this.meters.get(id)
+    if (meter) {
+      const now = performance.now()
       let rms = 0
-      if (active && !locallyMuted && this.playbackVolume(participant.identity) > 0 && !this.audio.get(participant.identity)?.element.paused) {
+      if (!muted && this.enabled && !this.deafened && !this.testing && !locallyMuted && this.playbackVolume(id) > 0 && !this.audio.get(id)?.element.paused) {
         meter.analyser.getFloatTimeDomainData(meter.samples)
         rms = Math.sqrt(meter.samples.reduce((sum, value) => sum + value * value, 0) / meter.samples.length)
       }
       meter.activeUntil = voiceActiveUntil(rms, meter.activeUntil, now)
       speaking = meter.activeUntil > now
     }
-    return { id: participant.identity, enabled, muted, deafened, locallyMuted, volume, speaking }
+    return { id, enabled, muted, deafened: participant.deafened, locallyMuted, volume: this.participantVolumes.get(id) ?? 1, speaking }
   }
 
   private emit(): void {
     if (this.closed) return
+    const local = this.localState()
     const state: VoiceState = {
-      enabled: this.enabled, muted: this.muted || this.deafened || this.testing || !this.enabled || !this.microphone() || this.microphone()!.isMuted,
-      deafened: this.deafened || this.testing, busy: this.pending > 0,
-      inputLevel: !this.reportInputLevel || this.muted || this.deafened || this.testing ? undefined : this.inputGain?.inputLevel,
-      participants: [this.participantState(this.room.localParticipant, true),
-        ...[...this.room.remoteParticipants.values()].map(participant => this.participantState(participant, false))],
+      enabled: this.enabled, muted: local.muted, deafened: this.deafened || this.testing, busy: this.pending > 0,
+      inputLevel: !this.reportInputLevel || this.muted || this.deafened || this.testing ? undefined : this.capture?.processor.inputLevel,
+      participants: [local, ...[...this.remote.values()].map(participant => this.remoteState(participant))],
     }
     const signature = JSON.stringify(state)
     if (signature === this.signature) return

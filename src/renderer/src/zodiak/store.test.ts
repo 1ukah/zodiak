@@ -21,7 +21,7 @@ function message(id: string, author = alice): Message {
 }
 
 function ready(store: ZodiakStore): void {
-  store.apply({ t: 'READY', d: { user: alice, guilds: [guild()] } })
+  store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [] } })
 }
 
 describe('ZodiakStore', () => {
@@ -71,6 +71,17 @@ describe('ZodiakStore', () => {
     ready(store)
     store.apply({ t: 'MESSAGE_CREATE', d: message('7') })
     expect(store.history('11')).toBeUndefined()
+  })
+
+  it('tracks who is in each voice channel', () => {
+    const store = new ZodiakStore()
+    store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [
+      { guild_id: '10', channel_id: '12', participants: [{ user_id: alice.id, muted: false, deafened: false, streaming: false }] },
+    ] } })
+    expect(store.voice.get('12')?.participants).toHaveLength(1)
+    store.apply({ t: 'VOICE_STATE_UPDATE', d: { guild_id: '10', channel_id: '12', participants: [] } })
+    expect(store.voice.has('12')).toBe(false)
+    expect(store.memberName('10', alice.id)).toBe('Alice')
   })
 
   it('compares 64-bit IDs as numbers', () => {

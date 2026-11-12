@@ -1,4 +1,4 @@
-import type { Channel, GatewayEvent, GuildSnapshot, Id, Member, Message, User } from '../../../shared/protocol'
+import type { Channel, GatewayEvent, GuildSnapshot, Id, Member, Message, User, VoiceChannelState } from '../../../shared/protocol'
 
 export interface ChannelHistory {
   /** Oldest first. */
@@ -25,6 +25,8 @@ export function compareIds(a: Id, b: Id): number {
 export class ZodiakStore {
   user: User | null = null
   guilds: GuildSnapshot[] = []
+  /** Voice channels with participants, by channel. */
+  voice = new Map<Id, VoiceChannelState>()
   private histories = new Map<Id, ChannelHistory>()
   private listeners = new Set<(change: StoreChange) => void>()
 
@@ -40,8 +42,14 @@ export class ZodiakStore {
   reset(): void {
     this.user = null
     this.guilds = []
+    this.voice.clear()
     this.histories.clear()
     this.emit({ kind: 'all' })
+  }
+
+  /** Display name of a server member, or `undefined` when the user is not a member. */
+  memberName(guildId: Id, userId: Id): string | undefined {
+    return this.guild(guildId)?.members.find((m) => m.user.id === userId)?.user.display_name
   }
 
   guild(id: Id | null): GuildSnapshot | undefined {
@@ -95,8 +103,14 @@ export class ZodiakStore {
         // Messages may have been missed while disconnected, so cached history is dropped.
         this.user = event.d.user
         this.guilds = event.d.guilds.map((g) => ({ ...g, channels: [...g.channels].sort(byPosition) }))
+        this.voice = new Map(event.d.voice_states.map((state) => [state.channel_id, state]))
         this.histories.clear()
         this.emit({ kind: 'all' })
+        return
+      case 'VOICE_STATE_UPDATE':
+        if (event.d.participants.length) this.voice.set(event.d.channel_id, event.d)
+        else this.voice.delete(event.d.channel_id)
+        this.emit({ kind: 'guilds' })
         return
       case 'USER_UPDATE':
         this.updateUser(event.d)
@@ -117,7 +131,7 @@ export class ZodiakStore {
       }
       case 'GUILD_DELETE': {
         const snapshot = this.guild(event.d.id)
-        snapshot?.channels.forEach((c) => this.histories.delete(c.id))
+        snapshot?.channels.forEach((c) => { this.histories.delete(c.id); this.voice.delete(c.id) })
         this.guilds = this.guilds.filter((g) => g.guild.id !== event.d.id)
         this.emit({ kind: 'guilds' })
         return

@@ -1,4 +1,4 @@
-// The lobby needs no WebRTC engine. Load it only when joining a room, retaining
+// The lobby needs no WebRTC engine. Load it only when joining voice, retaining
 // settings selected before the first connection and sharing one import promise.
 import type * as Session from './session'
 export type { Presence, RoomParticipant, ScreenStream, SessionHooks, StreamMetric, StreamTelemetry } from './session'
@@ -34,7 +34,6 @@ export async function leaveRoom() { await engine?.leaveRoom() }
 export async function publishScreen(...args: Parameters<Engine['publishScreen']>) { await active().publishScreen(...args) }
 export async function unpublishScreen() { await engine?.unpublishScreen() }
 export async function updateDisplayName(...args: Parameters<Engine['updateDisplayName']>) { await active().updateDisplayName(...args) }
-export async function sendChatMessage(...args: Parameters<Engine['sendChatMessage']>) { return active().sendChatMessage(...args) }
 export async function resumeRemoteAudio() { await engine?.resumeRemoteAudio() }
 export async function configureVoice(...args: Parameters<Engine['configureVoice']>) { await engine?.configureVoice(...args) }
 export async function setVoiceMuted(...args: Parameters<Engine['setVoiceMuted']>) { await engine?.setVoiceMuted(...args) }

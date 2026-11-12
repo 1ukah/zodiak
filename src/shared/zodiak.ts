@@ -1,4 +1,4 @@
-import type { GatewayEvent, LoginRequest, RegisterRequest, User } from './protocol'
+import type { GatewayEvent, LoginRequest, MediaClientFrame, MediaServerFrame, RegisterRequest, User } from './protocol'
 
 export type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
 
@@ -29,7 +29,21 @@ export const zodiakChannels = {
   event: 'zodiak:event',
   gatewayState: 'zodiak:gateway-state',
   signedOut: 'zodiak:signed-out',
+  mediaConnect: 'zodiak:media:connect',
+  mediaSend: 'zodiak:media:send',
+  mediaDisconnect: 'zodiak:media:disconnect',
+  mediaFrame: 'zodiak:media:frame',
+  mediaClosed: 'zodiak:media:closed',
 } as const
+
+export interface MediaBridge {
+  /** Gets a ticket for the voice channel and opens the signaling connection. */
+  connect: (channelId: string) => Promise<ApiResult<true>>
+  send: (frame: MediaClientFrame) => void
+  disconnect: () => Promise<void>
+  onFrame: (listener: (frame: MediaServerFrame) => void) => () => void
+  onClosed: (listener: (reason: string) => void) => () => void
+}
 
 export interface ZodiakBridge {
   session: () => Promise<SessionState>
@@ -41,4 +55,5 @@ export interface ZodiakBridge {
   onGatewayState: (listener: (state: GatewayState) => void) => () => void
   /** The server ended the session (logout elsewhere, password change, or expiry). */
   onSignedOut: (listener: () => void) => () => void
+  media: MediaBridge
 }

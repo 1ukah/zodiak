@@ -1,9 +1,9 @@
-import { Track, type AudioProcessorOptions, type TrackProcessor } from 'livekit-client'
 import { createNoiseGateNode, type NoiseGateSettings, type InputLevel } from './noise-gate'
 
-/** One LiveKit processor combines denoising, sensitivity gating, and input gain. */
-export class MicrophoneProcessor implements TrackProcessor<Track.Kind.Audio, AudioProcessorOptions> {
-  readonly name = 'microphone-processing'
+export interface AudioProcessorOptions { track: MediaStreamTrack }
+
+/** Combines denoising, sensitivity gating and input gain. `processedTrack` is what voice sends. */
+export class MicrophoneProcessor {
   processedTrack?: MediaStreamTrack
   private source?: MediaStreamAudioSourceNode
   private gain?: GainNode
@@ -35,7 +35,7 @@ export class MicrophoneProcessor implements TrackProcessor<Track.Kind.Audio, Aud
     if (this.gain) this.gain.gain.value = volume
   }
 
-  /** The exact signal sent to LiveKit, after every filter and input gain. */
+  /** The exact signal that voice sends, after every filter and input gain. */
   getOutputRms(): number {
     if (this.volume <= 0 || !this.analyser || this.context.state !== 'running' || !this.processedTrack?.enabled || this.processedTrack.readyState !== 'live') return 0
     this.analyser.getFloatTimeDomainData(this.samples)

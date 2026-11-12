@@ -1,9 +1,8 @@
-import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type Role, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
+import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
 import type { User } from '../../shared/protocol'
 import { ZodiakUi } from './zodiak/ui'
-import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, sendChatMessage, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, setTelemetryEnabled, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session-loader'
+import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, setTelemetryEnabled, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session-loader'
 import { hydrateIcons, icon, labelButton, setButtonIcon } from './icons'
-import { RoomChat } from './chat'
 import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, setVoiceParticipantMuted, setVoiceParticipantVolume, setMicrophoneTestActive } from './session-loader'
 import type { VoiceState } from './voice'
 import type { LoopbackSettings, MicrophoneLoopback } from './microphone-loopback'
@@ -86,7 +85,6 @@ const checkForUpdatesOnStartupInput = byId('check-for-updates-on-startup', HTMLI
 // Beta is paused; every build follows Stable.
 // const updateChannelInput = byId('update-channel', HTMLSelectElement)
 const hardwareAccelerationInput = byId('hardware-acceleration', HTMLInputElement)
-const showChatBubblesInput = byId('show-chat-bubbles', HTMLInputElement)
 const voiceEnabledInput = byId('voice-enabled', HTMLInputElement)
 const noiseSuppressionInput = byId('voice-noise-suppression', HTMLInputElement)
 const suppressionStrengthInput = byId('voice-suppression-strength', HTMLInputElement)
@@ -148,15 +146,12 @@ const streamVolumes = new Map<string, number>()
 let participantPreferenceServer: string | null = null
 let participantPreferences = new Map<string, ParticipantPreference>()
 const participantPreferenceWrites = new Set<Promise<void>>()
-const chat = new RoomChat(sendChatMessage, makeAvatar, () => renderMembers())
 let zodiak: ZodiakUi
 
 const hooks: SessionHooks = {
   onVoice: (state) => { voiceState = state; syncVoiceUI(); if (!loopbackRequested && settingsDialog.open) showInputLevel(state.inputLevel) },
-  onRoomLost: () => chat.clearHistory(),
-  onChatMessage: (message) => chat.receive(message),
+  onRoomLost: () => { resetRoomState(); zodiak.voiceChanged(); renderChrome() },
   onConnection: (state) => {
-    if (state === 'reconnecting' && connection !== 'reconnecting') chat.clearHistory()
     connection = state
     renderChrome()
   },
@@ -171,7 +166,6 @@ const hooks: SessionHooks = {
     })) return
     participants = ordered
     rememberParticipantPreferences(ordered)
-    if (!joiningSession) chat.setParticipants(ordered)
     renderMembers()
     renderChrome()
   },
@@ -450,60 +444,41 @@ async function onJoin(channelId: string): Promise<void> {
   if (currentRoom === channelId && connection === 'connected') return
   if (!requireName()) return
   joining = true; renderRooms()
-  try { await connect(channelId, 'viewer') }
+  try { await connect(channelId) }
   catch (error) { showNote(stageNote, messageOf(error), 'error') }
   finally { joining = false; zodiak.voiceChanged(); renderChrome() }
 }
 
-async function connect(roomName: string, role: Role): Promise<boolean> {
+/** Voice preferences (per-user volumes) are kept under one fixed key, by account ID. */
+const PREFERENCES_KEY = 'wss://zodiak'
+
+async function connect(channelId: string): Promise<boolean> {
   const saved = await persistConfig(); if (!saved) return false
-  const issued = await window.sharescreen.createToken({ role, displayName: saved.displayName, room: roomName })
-  if (!issued.ok) { showNote(picker.open ? pickerNote : stageNote, issued.error, 'error'); return false }
-  const preferences = await window.sharescreen.getParticipantPreferences(issued.value.url)
+  const preferences = await window.sharescreen.getParticipantPreferences(PREFERENCES_KEY)
   if (!preferences.ok) { showNote(stageNote, `Could not load participant volumes: ${preferences.error}`, 'error'); return false }
-  participantPreferenceServer = issued.value.url
+  participantPreferenceServer = PREFERENCES_KEY
   participantPreferences = new Map(Object.entries(preferences.value))
   joiningSession = true
   const workspace = elementById('room-workspace')
   workspace.inert = true
-  chat.setConnection(false)
-  const pendingMessages: Parameters<SessionHooks['onChatMessage']>[0][] = []
-  let chatReady = false
   try {
     await joinRoom({
-      url: issued.value.url,
-      token: issued.value.token,
-      subscribe: false,
+      channelId,
+      name: saved.displayName,
       voice: { enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength, echoCancellation: saved.voiceEchoCancellation, autoGainControl: saved.voiceAutoGainControl, noiseGate: saved.voiceNoiseGate, autoInputSensitivity: saved.voiceAutoInputSensitivity, inputSensitivity: saved.voiceInputSensitivity, participantVolumes: Object.fromEntries([...participantPreferences].map(([id, preference]) => [id, preference.volume])) },
       media: { video, audioRack },
-      hooks: {
-        ...hooks,
-        onChatMessage: (message) => {
-          if (chatReady) hooks.onChatMessage(message)
-          else pendingMessages.push(message)
-        },
-      },
-      roster: async () => {
-        const roster = await window.sharescreen.listRoomParticipants({ name: roomName })
-        if (!roster.ok) throw new Error(roster.error)
-        return roster.value
-      },
+      hooks,
     })
   } catch (error) {
     workspace.inert = false
     joiningSession = false
-    chat.clearHistory(); resetRoomState(); showNote(picker.open ? pickerNote : stageNote, messageOf(error), 'error'); renderChrome(); return false
+    resetRoomState(); showNote(picker.open ? pickerNote : stageNote, messageOf(error), 'error'); renderChrome(); return false
   }
   workspace.inert = false
   joiningSession = false
-  currentRoom = roomName
+  currentRoom = channelId
   hideLocalPreview = false
-  chat.begin(roomName, issued.value.url)
-  chat.setParticipants(participants)
   clearNote(stageNote); renderRooms(); renderMembers(); renderChrome()
-  chatReady = true
-  pendingMessages.forEach((message) => chat.receive(message))
-  pendingMessages.length = 0
   zodiak.voiceChanged()
   return true
 }
@@ -655,7 +630,6 @@ function resetRoomState(): void {
   participantPreferences.clear()
   setTheater(false)
   currentRoom = null; connection = 'offline'; streams = []; participants = []; selectedStreamId = null; hideLocalPreview = false; gridView = false; telemetry = {}; lastGridSignature = ''; streamVolumes.clear(); hearButton.hidden = true
-  chat.reset()
 }
 
 function selectBestStream(): void {
@@ -667,7 +641,6 @@ function renderChrome(): void {
   syncVoiceUI()
   if (joiningSession) return
   const inRoom = currentRoom !== null
-  chat.setConnection(connection === 'connected' && inRoom)
   const localStream = streams.find((stream) => stream.local)
   const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
   document.body.classList.toggle('in-room', inRoom)
@@ -926,13 +899,6 @@ function renderMembers(): void {
         toggleParticipantAudio(participant.id)
       })
       actions.append(mute)
-      const whisper = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-button member-whisper', innerHTML: icon('chat') })
-      whisper.dataset.whisper = participant.id
-      labelButton(whisper, `Whisper to ${participant.name}`)
-      const unread = chat.unreadFor(participant.id)
-      if (unread) whisper.append(Object.assign(document.createElement('span'), { className: 'chat-badge', textContent: unread > 99 ? '+99' : String(unread) }))
-      whisper.addEventListener('click', () => chat.whisper(participant.id))
-      actions.append(whisper)
     }
     member.append(actions)
     membersList.append(member)
@@ -1104,7 +1070,7 @@ function syncSensitivity(): void {
 function showInputLevel(level?: import('./noise-gate').InputLevel): void {
   sensitivityMeter.style.setProperty('--level', String(Math.max(0, Math.min(1, (100 + (level?.db ?? -100)) / 100))))
   if (level && autoSensitivityInput.checked) sensitivityInput.parentElement!.style.setProperty('--threshold', String((100 + level.threshold) / 100))
-  sensitivityStatus.value = level ? `${level.db} dB Ãƒâ€šÃ‚Â· ${level.open ? 'Passing audio' : 'Gate closed'}` : 'Test your microphone to see the input level'
+  sensitivityStatus.value = level ? `${level.db} dB ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ${level.open ? 'Passing audio' : 'Gate closed'}` : 'Test your microphone to see the input level'
 }
 
 function syncVoiceSettings(): void {
@@ -1228,13 +1194,13 @@ function syncQualityControls(): void {
   fixedBitrateField.hidden = bitrateMode !== 'fixed'
   bitrateValue.value = formatBitrate(bitrate)
   bitrateValue.textContent = bitrateValue.value
-  resolutionInput.title = `${formatBitrate(range.min)}ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“${formatBitrate(range.max)}`
+  resolutionInput.title = `${formatBitrate(range.min)}ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ${formatBitrate(range.max)}`
   frameRateInput.title = 'Frame rate'
   priorityInput.title = priority === 'framerate'
     ? 'Keeps the selected frame rate by reducing resolution when constrained'
     : 'Keeps image detail by allowing frames to be dropped when constrained'
   bitrateInput.title = `Fixed bitrate: ${formatBitrate(bitrate)}`
-  bitrateModeInput.title = bitrateMode === 'fixed' ? `Fixed target: ${formatBitrate(bitrate)}` : `Adaptive range: ${formatBitrate(range.min)}ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“${formatBitrate(range.max)}`
+  bitrateModeInput.title = bitrateMode === 'fixed' ? `Fixed target: ${formatBitrate(bitrate)}` : `Adaptive range: ${formatBitrate(range.min)}ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ${formatBitrate(range.max)}`
 }
 
 function syncSystemAudioControls(): void {
@@ -1324,14 +1290,14 @@ function renderTelemetry(): void {
 function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, side: 'host' | 'viewer'): void {
   card.hidden = !metric
   if (!metric) return
-  const quality = metric.width && metric.height ? `${metric.width} ÃƒÆ’Ã¢â‚¬â€ ${metric.height}` : 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'
-  const capture = metric.captureWidth && metric.captureHeight ? `${metric.captureWidth} ÃƒÆ’Ã¢â‚¬â€ ${metric.captureHeight}${metric.captureFrameRate ? ` @ ${Math.round(metric.captureFrameRate)} fps` : ''}` : undefined
+  const quality = metric.width && metric.height ? `${metric.width} ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ${metric.height}` : 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'
+  const capture = metric.captureWidth && metric.captureHeight ? `${metric.captureWidth} ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ${metric.captureHeight}${metric.captureFrameRate ? ` @ ${Math.round(metric.captureFrameRate)} fps` : ''}` : undefined
   const baseRows: Array<[string, string]> = [
     ['Encoded', quality],
     ...(capture ? [['Capture', capture] as [string, string]] : []),
     ['Bitrate', formatBitrate(metric.bitrate)],
-    ['Frame rate', metric.frameRate ? `${Math.round(metric.frameRate)} fps` : 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'],
-    ['Packet rate', metric.packetRate ? `${Math.round(metric.packetRate)} /s` : 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'],
+    ['Frame rate', metric.frameRate ? `${Math.round(metric.frameRate)} fps` : 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'],
+    ['Packet rate', metric.packetRate ? `${Math.round(metric.packetRate)} /s` : 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'],
     ['Jitter', formatMilliseconds(metric.jitterMs)],
     ['Packet loss', formatPacketLoss(metric)],
     ['Packets', formatCount(metric.packets)],
@@ -1343,16 +1309,16 @@ function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, s
       ['Budget', formatBitrate(metric.maxBitrate)],
       ['Encoder target', formatBitrate(metric.targetBitrate)],
       ['GPU encode', gpuFeatureLabel(captureAccelerationStatus)],
-      ['Encoder', metric.encoder ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'],
-      ['Efficient encode', metric.powerEfficientEncoder === undefined ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : metric.powerEfficientEncoder ? 'Yes' : 'No'],
+      ['Encoder', metric.encoder ?? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'],
+      ['Efficient encode', metric.powerEfficientEncoder === undefined ? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â' : metric.powerEfficientEncoder ? 'Yes' : 'No'],
       ['Encode', formatMilliseconds(metric.encodeTimeMs)],
       ['Limit', formatLimitation(metric)],
       ['RTT', formatMilliseconds(metric.roundTripTimeMs)],
     ]
     : [
-      ['Codec', metric.codec ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'],
-      ['Decoder', metric.decoder ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'],
-      ['Dropped', metric.framesDropped === undefined ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : formatCount(metric.framesDropped)],
+      ['Codec', metric.codec ?? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'],
+      ['Decoder', metric.decoder ?? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'],
+      ['Dropped', metric.framesDropped === undefined ? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â' : formatCount(metric.framesDropped)],
       ['Buffer', formatMilliseconds(metric.jitterBufferDelayMs)],
       ['Decode', formatMilliseconds(metric.decodeTimeMs)],
     ]
@@ -1367,15 +1333,15 @@ function renderMetricCard(card: HTMLElement, metric: StreamMetric | undefined, s
   }))
 }
 
-function formatMilliseconds(value: number | undefined): string { return value === undefined ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : `${Math.round(value)} ms` }
+function formatMilliseconds(value: number | undefined): string { return value === undefined ? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â' : `${Math.round(value)} ms` }
 function formatPacketLoss(metric: StreamMetric): string {
-  if (metric.packetLossPercent === undefined) return metric.packetsLost === undefined ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : `${formatCount(metric.packetsLost)} lost`
-  return `${metric.packetLossPercent.toFixed(metric.packetLossPercent < 1 ? 2 : 1)}% Ãƒâ€šÃ‚Â· ${formatCount(metric.packetsLost ?? 0)} lost`
+  if (metric.packetLossPercent === undefined) return metric.packetsLost === undefined ? 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â' : `${formatCount(metric.packetsLost)} lost`
+  return `${metric.packetLossPercent.toFixed(metric.packetLossPercent < 1 ? 2 : 1)}% ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ${formatCount(metric.packetsLost ?? 0)} lost`
 }
 function formatLimitation(metric: StreamMetric): string {
   if (!metric.qualityLimitationReason || metric.qualityLimitationReason === 'none') return 'None'
   const reason = metric.qualityLimitationReason === 'cpu' ? 'CPU / encoder' : metric.qualityLimitationReason
-  return metric.qualityLimitationDurationMs === undefined ? reason : `${reason} Ãƒâ€šÃ‚Â· ${formatMilliseconds(metric.qualityLimitationDurationMs)}`
+  return metric.qualityLimitationDurationMs === undefined ? reason : `${reason} ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ${formatMilliseconds(metric.qualityLimitationDurationMs)}`
 }
 function formatCount(value: number): string { return new Intl.NumberFormat().format(Math.round(value)) }
 function formatBytes(value: number): string {
@@ -1386,7 +1352,7 @@ function formatBytes(value: number): string {
 
 
 function formatBitrate(bits: number | undefined): string {
-  if (!bits) return 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'
+  if (!bits) return 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'
   if (bits >= 1_000_000) return `${(bits / 1_000_000).toFixed(1)} Mb/s`
   return `${Math.round(bits / 1_000)} Kb/s`
 }
@@ -1400,7 +1366,7 @@ async function persistConfig(): Promise<AppConfig | null> {
     fillForm(saved.value); return saved.value
   } catch (error) { openServerSettings(); showNote(serverNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: 'stable', hardwareAcceleration: hardwareAccelerationInput.checked, showChatBubbles: showChatBubblesInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100, voiceEchoCancellation: echoCancellationInput.checked, voiceAutoGainControl: autoGainControlInput.checked, voiceNoiseGate: noiseGateInput.checked, voiceAutoInputSensitivity: autoSensitivityInput.checked, voiceInputSensitivity: Number(sensitivityInput.value) } }
+function readForm(): AppConfig { return { url: urlInput.value, apiKey: keyInput.value, apiSecret: secretInput.value, displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: 'stable', hardwareAcceleration: hardwareAccelerationInput.checked, showChatBubbles: false, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100, voiceEchoCancellation: echoCancellationInput.checked, voiceAutoGainControl: autoGainControlInput.checked, voiceNoiseGate: noiseGateInput.checked, voiceAutoInputSensitivity: autoSensitivityInput.checked, voiceInputSensitivity: Number(sensitivityInput.value) } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
   urlInput.value = config.url; keyInput.value = config.apiKey; secretInput.value = config.apiSecret; nameInput.value = config.displayName
@@ -1410,7 +1376,6 @@ function fillForm(config: AppConfig): void {
   // updateChannelInput.value = config.updateChannel === 'beta' ? 'beta' : 'stable'
   hardwareAccelerationInput.checked = config.hardwareAcceleration !== false
   showStreamStatisticsInput.checked = showStatistics
-  showChatBubblesInput.checked = config.showChatBubbles === true
   voiceEnabledInput.checked = config.voiceEnabled !== false
   echoCancellationInput.checked = config.voiceEchoCancellation !== false
   autoGainControlInput.checked = config.voiceAutoGainControl === true
@@ -1427,7 +1392,6 @@ function fillForm(config: AppConfig): void {
   voiceInputVolume.value = String(Math.round((config.voiceInputVolume ?? 1) * 100))
   syncVoiceInputVolume()
   syncVoiceSettings()
-  chat.configure(showChatBubblesInput.checked)
   elementById('profile-name').textContent = config.displayName || 'Name'
   elementById('profile-avatar').textContent = initials(config.displayName)
   elementById('profile-avatar').style.setProperty('--avatar-hue', String(avatarHue(config.displayName)))

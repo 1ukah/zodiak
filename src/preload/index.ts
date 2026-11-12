@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { GatewayEvent } from '../shared/protocol'
+import type { GatewayEvent, MediaServerFrame } from '../shared/protocol'
 import { channels, type SharescreenApi, type UpdateState } from '../shared/types'
 import { zodiakChannels, type GatewayState, type ZodiakBridge } from '../shared/zodiak'
 
@@ -77,6 +77,13 @@ const zodiak = {
   onEvent: (listener) => subscribe<GatewayEvent>(zodiakChannels.event, listener),
   onGatewayState: (listener) => subscribe<GatewayState>(zodiakChannels.gatewayState, listener),
   onSignedOut: (listener) => subscribe<void>(zodiakChannels.signedOut, () => listener()),
+  media: {
+    connect: (channelId) => ipcRenderer.invoke(zodiakChannels.mediaConnect, channelId),
+    send: (frame) => ipcRenderer.send(zodiakChannels.mediaSend, frame),
+    disconnect: () => ipcRenderer.invoke(zodiakChannels.mediaDisconnect),
+    onFrame: (listener) => subscribe<MediaServerFrame>(zodiakChannels.mediaFrame, listener),
+    onClosed: (listener) => subscribe<string>(zodiakChannels.mediaClosed, listener),
+  },
 } satisfies ZodiakBridge
 
 contextBridge.exposeInMainWorld('zodiak', zodiak)
