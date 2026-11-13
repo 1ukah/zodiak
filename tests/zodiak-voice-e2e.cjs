@@ -192,6 +192,19 @@ async function guest(win) {
     log(`PASS watches the host's screen (${video.frames} frames decoded)`)
     await until('the voice panel under the channel', `document.querySelectorAll('#channel-list #members-panel .member').length === 2 && Boolean(document.querySelector('#channel-list #members-panel .member-live')) && !document.querySelector('.voice-members')`, 10_000)
     log('PASS the connected channel shows one list with both people and the LIVE screen')
+
+    // Volumes per person are account settings on the server.
+    const hostId = await js(`document.querySelector('#members-list .member .member-voice-mute').closest('.member').dataset.participantId`)
+    await js(`document.querySelector('#members-list .member .member-voice-mute').click()`)
+    await until('the volume popup', `document.querySelector('#participant-audio').matches(':popover-open')`, 5_000)
+    await js(`(() => { const s = document.querySelector('#participant-audio-volume'); s.value = '60'; s.dispatchEvent(new Event('input')) })()`)
+    const streamSlider = `document.querySelector('.grid-tile-volume') || document.querySelector('#focused-stream-volume-input')`
+    await js(`(() => { const s = ${streamSlider}; s.value = '140'; s.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await until('the settings on the server', `window.zodiak.request({ method: 'GET', path: '/v1/users/@me/settings' }).then(r => {
+      const host = r.ok && r.value.people.find(p => p.user_id === ${JSON.stringify(hostId)})
+      return Boolean(host) && Math.abs(host.voice_volume - 0.6) < 0.001 && Math.abs(host.stream_volume - 1.4) < 0.001
+    })`, 5_000)
+    log('PASS voice and screen-share volumes for the host are saved on the server')
     await new Promise((resolve) => setTimeout(resolve, 800))
     await shot('zodiak-05-voice-guest.png')
     await fs.writeFile(path.join(shared, 'guest-watching.json'), '{}')

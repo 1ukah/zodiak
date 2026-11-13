@@ -1,19 +1,19 @@
 import { app } from 'electron'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PARTICIPANT_PREFERENCES_SERVER } from '../shared/types'
 import { loadConfig } from './config'
-import { keepOnlyParticipantPreferences } from './participant-preferences'
 
 /**
- * Removes data that versions before 2.0 (LiveKit) saved and this version does not use:
- * the LiveKit key and secret in config.json, the LiveKit identity, and volumes saved
- * under LiveKit server URLs. Paths did not change, so nothing has to move.
+ * Removes data that older versions saved on the PC and this version does not use:
+ * - versions before 2.0 (LiveKit): the LiveKit key and secret in config.json, and the LiveKit identity;
+ * - versions before 2.1: volumes per person, which are now account settings on the server.
+ * Paths did not change, so nothing has to move.
  */
 export async function removeLegacyData(): Promise<void> {
+  const userData = app.getPath('userData')
   await Promise.allSettled([
     loadConfig(),
-    rm(join(app.getPath('userData'), 'identity.json'), { force: true }),
-    keepOnlyParticipantPreferences(PARTICIPANT_PREFERENCES_SERVER),
+    rm(join(userData, 'identity.json'), { force: true }),
+    rm(join(userData, 'participant-volumes.json'), { force: true }),
   ])
 }

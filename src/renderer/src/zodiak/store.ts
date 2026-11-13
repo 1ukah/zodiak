@@ -1,4 +1,4 @@
-import type { Channel, GatewayEvent, GuildSnapshot, Id, Member, Message, User, VoiceChannelState } from '../../../shared/protocol'
+import type { Channel, GatewayEvent, GuildSnapshot, Id, Member, Message, PersonSettings, UpdatePersonSettingsRequest, User, VoiceChannelState } from '../../../shared/protocol'
 
 export interface ChannelHistory {
   /** Oldest first. */
@@ -29,6 +29,9 @@ export class ZodiakStore {
   voice = new Map<Id, VoiceChannelState>()
   /** Users who share a server with this user and are online, including this user. */
   online = new Set<Id>()
+  /** Account settings saved on the server. Local changes show at once; ZodiakUi saves them. */
+  membersHidden = false
+  private people = new Map<Id, PersonSettings>()
   private histories = new Map<Id, ChannelHistory>()
   private listeners = new Set<(change: StoreChange) => void>()
 
@@ -46,8 +49,30 @@ export class ZodiakStore {
     this.guilds = []
     this.voice.clear()
     this.online.clear()
+    this.membersHidden = false
+    this.people.clear()
     this.histories.clear()
     this.emit({ kind: 'all' })
+  }
+
+  /** How this user hears another person. People without saved settings get the defaults. */
+  person(userId: Id): PersonSettings {
+    return this.people.get(userId) ?? { user_id: userId, voice_volume: 1, voice_muted: false, stream_volume: 1, stream_muted: false }
+  }
+
+  savedPeople(): PersonSettings[] {
+    return [...this.people.values()]
+  }
+
+  /** Changes only the fields in `patch`. Does not notify listeners, so sliders stay smooth. */
+  updatePerson(userId: Id, patch: UpdatePersonSettingsRequest): void {
+    const changes = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined))
+    this.people.set(userId, { ...this.person(userId), ...changes })
+  }
+
+  setMembersHidden(hidden: boolean): void {
+    this.membersHidden = hidden
+    this.emit({ kind: 'guilds' })
   }
 
   isOnline(userId: Id): boolean {
@@ -112,6 +137,8 @@ export class ZodiakStore {
         this.guilds = event.d.guilds.map((g) => ({ ...g, channels: [...g.channels].sort(byPosition) }))
         this.voice = new Map(event.d.voice_states.map((state) => [state.channel_id, state]))
         this.online = new Set(event.d.online)
+        this.membersHidden = event.d.settings.members_hidden
+        this.people = new Map(event.d.settings.people.map((person) => [person.user_id, person]))
         this.histories.clear()
         this.emit({ kind: 'all' })
         return

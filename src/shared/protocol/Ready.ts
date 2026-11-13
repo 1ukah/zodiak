@@ -2,6 +2,7 @@
 import type { GuildSnapshot } from "./GuildSnapshot";
 import type { Id } from "./Id";
 import type { User } from "./User";
+import type { UserSettings } from "./UserSettings";
 import type { VoiceChannelState } from "./VoiceChannelState";
 
 export type Ready = { user: User, guilds: Array<GuildSnapshot>, 
@@ -12,4 +13,8 @@ voice_states: Array<VoiceChannelState>,
 /**
  * Users who share a server with this user and are online now.
  */
-online: Array<Id>, };
+online: Array<Id>, 
+/**
+ * The account's saved settings, for example volumes per person.
+ */
+settings: UserSettings, };

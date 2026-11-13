@@ -15,8 +15,6 @@ const api = {
     ipcRenderer.on(channels.updateStateChanged, wrapped)
     return () => ipcRenderer.removeListener(channels.updateStateChanged, wrapped)
   },
-  getParticipantPreferences: (server) => ipcRenderer.invoke(channels.getParticipantPreferences, server),
-  saveParticipantPreferences: (request) => ipcRenderer.invoke(channels.saveParticipantPreferences, request),
   listSources: () => ipcRenderer.invoke(channels.listSources),
   prepareShare: (request) => ipcRenderer.invoke(channels.prepareShare, request),
   getCaptureAcceleration: () => ipcRenderer.invoke(channels.getCaptureAcceleration),

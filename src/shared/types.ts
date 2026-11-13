@@ -31,9 +31,6 @@ export interface AppConfig {
   voiceInputSensitivity: number
 }
 
-export interface ParticipantPreference { name: string; volume: number }
-export interface ParticipantPreferenceUpdate { id: string; name: string; volume?: number }
-
 export interface DesktopSourceInfo {
   id: string
   name: string
@@ -102,9 +99,6 @@ export interface CaptureAccelerationStatus {
 
 export type ActionResult<T> = { ok: true; value: T } | { ok: false; error: string }
 
-/** Participant volumes are saved under this key. Versions before 2.0 used LiveKit server URLs. */
-export const PARTICIPANT_PREFERENCES_SERVER = 'wss://zodiak'
-
 export const channels = {
   rendererReady: 'app:renderer-ready',
   getConfig: 'config:get',
@@ -113,8 +107,6 @@ export const channels = {
   getUpdateState: 'update:state:get',
   updateStateChanged: 'update:state:changed',
   updateAction: 'update:action',
-  getParticipantPreferences: 'participants:preferences:get',
-  saveParticipantPreferences: 'participants:preferences:save',
   listSources: 'sources:list',
   prepareShare: 'share:prepare',
   getCaptureAcceleration: 'share:acceleration',
@@ -137,8 +129,6 @@ export interface SharescreenApi {
   getUpdateState: () => Promise<UpdateState>
   onUpdateStateChanged: (listener: (state: UpdateState) => void) => () => void
   updateAction: (action: UpdateAction) => Promise<ActionResult<true>>
-  getParticipantPreferences: (server: string) => Promise<ActionResult<Record<string, ParticipantPreference>>>
-  saveParticipantPreferences: (request: { server: string; participants: ParticipantPreferenceUpdate[] }) => Promise<ActionResult<true>>
   listSources: () => Promise<ActionResult<DesktopSourceInfo[]>>
   prepareShare: (request: ShareStartRequest) => Promise<ActionResult<true>>
   getCaptureAcceleration: () => Promise<CaptureAccelerationStatus>

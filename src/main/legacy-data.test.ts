@@ -9,8 +9,8 @@ const { removeLegacyData } = await import('./legacy-data')
 
 const file = (name: string) => join(userData, name)
 
-describe('data from versions before 2.0', () => {
-  it('is removed, and the settings and new volumes stay', async () => {
+describe('data from older versions', () => {
+  it('is removed, and the PC settings stay', async () => {
     writeFileSync(file('config.json'), JSON.stringify({ url: 'wss://old.example:7880', apiKey: 'key', apiSecret: 'secret', showChatBubbles: true, voiceInputVolume: 0.4 }))
     writeFileSync(file('identity.json'), JSON.stringify({ version: 1, uuid: '6f1d2c3b-1a2b-4c3d-8e4f-123456789abc' }))
     writeFileSync(file('participant-volumes.json'), JSON.stringify({ version: 1, servers: {
@@ -25,8 +25,6 @@ describe('data from versions before 2.0', () => {
     expect(config).not.toContain('apiKey')
     expect(JSON.parse(config).voiceInputVolume).toBe(0.4)
     expect(existsSync(file('identity.json'))).toBe(false)
-    expect(JSON.parse(readFileSync(file('participant-volumes.json'), 'utf8')).servers).toEqual({
-      'wss://zodiak': { '42': { name: 'Friend', volume: 1.5 } },
-    })
+    expect(existsSync(file('participant-volumes.json'))).toBe(false)
   })
 })

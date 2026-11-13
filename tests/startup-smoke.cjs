@@ -38,16 +38,8 @@ async function start() {
           console.log('PASS Real preload / renderer readiness handshake')
           console.log('PASS Lobby starts without loading the WebRTC engine')
           console.log('PASS Splash closed after interface initialization')
-          const preference = await win.webContents.executeJavaScript(`(async()=>{
-            const server='ws://localhost:7880';
-            const saved=await window.sharescreen.saveParticipantPreferences({server,participants:[{id:'11111111-1111-4111-8111-111111111111',name:'Startup friend',volume:.35}]});
-            if(!saved.ok)throw Error(saved.error);
-            return window.sharescreen.getParticipantPreferences(server);
-          })()`)
-          if (!preference.ok || preference.value['11111111-1111-4111-8111-111111111111'].volume !== .35) throw Error('Participant preference IPC did not round-trip')
-          const stored = JSON.parse(await fs.readFile(path.join(profile,'participant-volumes.json'),'utf8'))
-          if (stored.servers['ws://localhost:7880']['11111111-1111-4111-8111-111111111111'].name !== 'Startup friend') throw Error('Participant name was not saved to disk')
-          console.log('PASS Real preload and main IPC persist participant names and volumes')
+          if (await win.webContents.executeJavaScript(`'getParticipantPreferences' in window.sharescreen`)) throw Error('Volumes per person must be account settings on the server, not files on the PC')
+          console.log('PASS Volumes per person are not saved on the PC')
           async function waitForVisibility(hidden) {
             for (let attempt = 0; attempt < 30; attempt++) {
               if (await win.webContents.executeJavaScript(`document.body.classList.contains('window-hidden') === ${hidden}`)) return

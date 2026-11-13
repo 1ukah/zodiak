@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { GuildSnapshot, Message, User } from '../../../shared/protocol'
+import type { GuildSnapshot, Message, User, UserSettings } from '../../../shared/protocol'
 import { compareIds, ZodiakStore } from './store'
 
 const alice: User = { id: '1', username: 'alice', display_name: 'Alice' }
 const bob: User = { id: '2', username: 'bob', display_name: 'Bob' }
+const noSettings: UserSettings = { members_hidden: false, people: [] }
 
 function guild(): GuildSnapshot {
   return {
@@ -21,7 +22,7 @@ function message(id: string, author = alice): Message {
 }
 
 function ready(store: ZodiakStore): void {
-  store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [], online: [] } })
+  store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [], online: [], settings: noSettings } })
 }
 
 describe('ZodiakStore', () => {
@@ -77,16 +78,29 @@ describe('ZodiakStore', () => {
     const store = new ZodiakStore()
     store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [
       { guild_id: '10', channel_id: '12', participants: [{ user_id: alice.id, muted: false, deafened: false, streaming: false }] },
-    ], online: [] } })
+    ], online: [], settings: noSettings } })
     expect(store.voice.get('12')?.participants).toHaveLength(1)
     store.apply({ t: 'VOICE_STATE_UPDATE', d: { guild_id: '10', channel_id: '12', participants: [] } })
     expect(store.voice.has('12')).toBe(false)
     expect(store.memberName('10', alice.id)).toBe('Alice')
   })
 
+  it('keeps the account settings from READY and local changes', () => {
+    const store = new ZodiakStore()
+    const settings: UserSettings = { members_hidden: true, people: [{ user_id: bob.id, voice_volume: 0.5, voice_muted: false, stream_volume: 1.5, stream_muted: true }] }
+    store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [], online: [], settings } })
+    expect(store.membersHidden).toBe(true)
+    expect(store.person(bob.id).stream_volume).toBe(1.5)
+    expect(store.person('99')).toEqual({ user_id: '99', voice_volume: 1, voice_muted: false, stream_volume: 1, stream_muted: false })
+    store.updatePerson(bob.id, { voice_muted: true, stream_volume: undefined })
+    expect(store.person(bob.id)).toEqual({ user_id: bob.id, voice_volume: 0.5, voice_muted: true, stream_volume: 1.5, stream_muted: true })
+    store.reset()
+    expect(store.savedPeople()).toEqual([])
+  })
+
   it('tracks who is online', () => {
     const store = new ZodiakStore()
-    store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [], online: [alice.id] } })
+    store.apply({ t: 'READY', d: { user: alice, guilds: [guild()], voice_states: [], online: [alice.id], settings: noSettings } })
     expect(store.isOnline(bob.id)).toBe(false)
     store.apply({ t: 'PRESENCE_UPDATE', d: { user_id: bob.id, online: true } })
     expect(store.isOnline(bob.id)).toBe(true)

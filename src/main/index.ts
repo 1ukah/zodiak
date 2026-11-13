@@ -8,7 +8,6 @@ import { hardwareAccelerationEnabledSync, loadConfig, saveConfig } from './confi
 import { removeLegacyData } from './legacy-data'
 import { isRecord } from './parse'
 import { settle } from './result'
-import { flushParticipantPreferences, getParticipantPreferences, saveParticipantPreferences } from './participant-preferences'
 import { registerZodiakIpc, stopZodiak } from './zodiak'
 
 // Electron enables Chromium's GPU pipeline by default. Users can turn it off in
@@ -310,8 +309,6 @@ function captureAccelerationStatus(): CaptureAccelerationStatus {
 
 function registerIpc(): void {
   ipcMain.handle(channels.getConfig, () => loadConfig())
-  ipcMain.handle(channels.getParticipantPreferences, (_event, server: unknown) => settle(() => getParticipantPreferences(server)))
-  ipcMain.handle(channels.saveParticipantPreferences, (_event, payload: unknown) => settle(async () => { await saveParticipantPreferences(payload); return true as const }))
   ipcMain.handle(channels.saveConfig, (event, payload: unknown) => settle(async () => {
     const previous = await loadConfig()
     const saved = await saveConfig(payload)
@@ -434,9 +431,3 @@ app.on('window-all-closed', () => {
   app.quit()
 })
 
-let preferencesFlushed = false
-app.on('before-quit', event => {
-  if (preferencesFlushed) return
-  event.preventDefault()
-  void flushParticipantPreferences().finally(() => { preferencesFlushed = true; app.quit() })
-})

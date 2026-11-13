@@ -1,4 +1,4 @@
-import type { Channel, ChannelKind, GuildSnapshot, Invite, Id, User } from '../../../shared/protocol'
+import type { Channel, ChannelKind, GuildSnapshot, Invite, Id, PersonSettings, UpdatePersonSettingsRequest, User, UserSettings } from '../../../shared/protocol'
 import type { GatewayState } from '../../../shared/zodiak'
 import { makeAvatar } from '../avatar'
 import { icon, labelButton } from '../icons'
@@ -16,7 +16,12 @@ export interface VoiceBridge {
   layoutChanged: () => void
   /** The account (or its display name) changed. */
   userChanged: (user: User | null) => void
+  /** Saving an account setting failed. */
+  settingsFailed: (message: string) => void
 }
+
+/** Slider moves are saved once the user stops moving it for this long. */
+const SETTINGS_SAVE_DELAY_MS = 400
 
 type View = 'text' | 'voice'
 const INVITE_LIFETIME_SECONDS = 7 * 24 * 60 * 60
@@ -70,6 +75,8 @@ export class ZodiakUi {
   private readonly channelList = el('channel-list', HTMLElement)
   private readonly guildName = el('guild-name', HTMLHeadingElement)
   private readonly banner = el('connection-banner', HTMLParagraphElement)
+  private readonly pendingPeople = new Map<Id, UpdatePersonSettingsRequest>()
+  private settingsTimer: number | null = null
 
   constructor(private readonly bridge: VoiceBridge) {
     this.text = new TextChannelView(this.store, (title, message, action, run) => this.confirm(title, message, action, run))
@@ -109,6 +116,33 @@ export class ZodiakUi {
     return this.store.user
   }
 
+  /** How this user hears another person (saved on the server). */
+  person(userId: Id): PersonSettings {
+    return this.store.person(userId)
+  }
+
+  savedPeople(): PersonSettings[] {
+    return this.store.savedPeople()
+  }
+
+  /** Shows the change at once and saves it shortly after the last change. */
+  savePerson(userId: Id, patch: UpdatePersonSettingsRequest): void {
+    this.store.updatePerson(userId, patch)
+    this.pendingPeople.set(userId, { ...this.pendingPeople.get(userId), ...patch })
+    if (this.settingsTimer === null) this.settingsTimer = window.setTimeout(() => void this.flushSettings(), SETTINGS_SAVE_DELAY_MS)
+  }
+
+  /** Sends every pending setting now. */
+  async flushSettings(): Promise<void> {
+    if (this.settingsTimer !== null) window.clearTimeout(this.settingsTimer)
+    this.settingsTimer = null
+    const pending = [...this.pendingPeople]
+    this.pendingPeople.clear()
+    const results = await Promise.allSettled(pending.map(([userId, patch]) => api<PersonSettings>('PUT', `/v1/users/@me/settings/people/${userId}`, patch)))
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (failed) this.bridge.settingsFailed(`Could not save your volume settings: ${errorText(failed.reason)}`)
+  }
+
   async start(): Promise<void> {
     const session = await window.zodiak.session()
     if (session.state === 'signed-in') this.signIn(session.user)
@@ -123,6 +157,7 @@ export class ZodiakUi {
   }
 
   async logout(everywhere: boolean): Promise<void> {
+    await this.flushSettings()
     await window.zodiak.logout(everywhere)
     await this.signedOut(null)
   }
@@ -149,6 +184,10 @@ export class ZodiakUi {
   private async signedOut(message: string | null): Promise<void> {
     if (!this.signedIn) return
     this.signedIn = false
+    // The session is gone, so changes that were not sent yet cannot be saved.
+    if (this.settingsTimer !== null) window.clearTimeout(this.settingsTimer)
+    this.settingsTimer = null
+    this.pendingPeople.clear()
     await this.bridge.leaveVoice().catch(() => undefined)
     for (const dialog of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) dialog.close()
     this.store.reset()
@@ -296,6 +335,11 @@ export class ZodiakUi {
   render(): void {
     document.body.classList.toggle('has-guild', this.hasGuild())
     document.body.classList.toggle('view-text', this.isTextView())
+    const membersVisible = !this.store.membersHidden
+    document.body.classList.toggle('members-hidden', !membersVisible)
+    const toggle = el('member-list-toggle', HTMLButtonElement)
+    toggle.setAttribute('aria-pressed', String(membersVisible))
+    labelButton(toggle, membersVisible ? 'Hide members' : 'Show members')
     this.banner.hidden = !this.signedIn || this.gatewayState === 'ready'
     this.renderRail()
     this.renderSidebar()
@@ -453,17 +497,13 @@ export class ZodiakUi {
     }
     el('auth-retry', HTMLButtonElement).addEventListener('click', () => void this.start())
 
-    const toggle = el('member-list-toggle', HTMLButtonElement)
-    const showMembers = (visible: boolean) => {
-      document.body.classList.toggle('members-hidden', !visible)
-      toggle.setAttribute('aria-pressed', String(visible))
-      labelButton(toggle, visible ? 'Hide members' : 'Show members')
-    }
-    showMembers(localStorage.getItem('zodiak.membersHidden') !== 'true')
-    toggle.addEventListener('click', () => {
-      const visible = document.body.classList.contains('members-hidden')
-      localStorage.setItem('zodiak.membersHidden', String(!visible))
-      showMembers(visible)
+    // Versions before the account settings kept this choice in local storage.
+    localStorage.removeItem('zodiak.membersHidden')
+    el('member-list-toggle', HTMLButtonElement).addEventListener('click', () => {
+      const hidden = !this.store.membersHidden
+      this.store.setMembersHidden(hidden)
+      api<UserSettings>('PATCH', '/v1/users/@me/settings', { members_hidden: hidden })
+        .catch((error) => this.bridge.settingsFailed(`Could not save your settings: ${errorText(error)}`))
     })
 
     el('create-room-action', HTMLButtonElement).addEventListener('click', () => {

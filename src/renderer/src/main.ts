@@ -8,7 +8,6 @@ import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, s
 import type { VoiceState } from './voice'
 import type { LoopbackSettings, MicrophoneLoopback } from './microphone-loopback'
 import { setViewerVisible, setVoiceInputLevelReporting } from './session-loader'
-import { PARTICIPANT_PREFERENCES_SERVER, type ParticipantPreference, type ParticipantPreferenceUpdate } from '../../shared/types'
 import { initializeUpdateUI } from './update-ui'
 
 hydrateIcons()
@@ -139,9 +138,8 @@ let screenControlsTimer: number | null = null
 // Keyed by participant: a re-shared screen is a new stream but keeps the same
 // audio level in the session, so the sliders must show that level too.
 const streamVolumes = new Map<string, number>()
-let participantPreferenceServer: string | null = null
-let participantPreferences = new Map<string, ParticipantPreference>()
-const participantPreferenceWrites = new Set<Promise<void>>()
+/** People in voice whose saved "mute for you" was already applied in this call. */
+const voiceMuteApplied = new Set<string>()
 let zodiak: ZodiakUi
 
 const hooks: SessionHooks = {
@@ -161,7 +159,7 @@ const hooks: SessionHooks = {
       return participant.id === previous.id && participant.name === previous.name && participant.local === previous.local
     })) return
     participants = ordered
-    rememberParticipantPreferences(ordered)
+    applySavedVoiceMutes(ordered)
     renderMembers()
     renderChrome()
   },
@@ -207,6 +205,7 @@ async function boot(): Promise<void> {
     },
     layoutChanged: () => renderChrome(),
     userChanged: (user) => syncAccount(user),
+    settingsFailed: (message) => showNote(currentRoom ? stageNote : listNote, message, 'error'),
   })
   fillForm(await window.sharescreen.getConfig())
   bind()
@@ -237,15 +236,16 @@ function bind(): void {
     if (!participantAudioId) return
     const state = voiceState.participants.find(person => person.id === participantAudioId)
     setVoiceParticipantMuted(participantAudioId, !state?.locallyMuted)
+    zodiak.savePerson(participantAudioId, { voice_muted: !state?.locallyMuted })
   })
   participantAudioSlider.addEventListener('input', () => {
     if (!participantAudioId) return
     const id = participantAudioId
     const volume = participantAudioSlider.valueAsNumber / 100
     setVoiceParticipantVolume(id, volume)
-    const participant = participants.find(person => person.id === id)
-    if (participant) rememberParticipantPreferences([participant], volume)
-    if (voiceState.participants.find(person => person.id === id)?.locallyMuted) setVoiceParticipantMuted(id, false)
+    const wasMuted = voiceState.participants.find(person => person.id === id)?.locallyMuted === true
+    if (wasMuted) setVoiceParticipantMuted(id, false)
+    zodiak.savePerson(id, wasMuted ? { voice_volume: volume, voice_muted: false } : { voice_volume: volume })
   })
   const dismissParticipantAudio = (event: Event) => {
     const target = event.target
@@ -337,7 +337,7 @@ function bind(): void {
     event.stopPropagation()
     const stream = streams.find((candidate) => candidate.id === selectedStreamId)
     if (!stream || stream.local) return
-    setStreamMuted(stream.id, !stream.muted)
+    muteStream(stream, !stream.muted)
     revealScreenControls()
   })
   focusedStreamHideButton.addEventListener('pointerdown', (event) => event.stopPropagation())
@@ -442,15 +442,10 @@ async function onJoin(channelId: string): Promise<void> {
   finally { joining = false; zodiak.voiceChanged(); renderChrome() }
 }
 
-/** Voice preferences (per-user volumes) are kept under one fixed key, by account ID. */
-const PREFERENCES_KEY = PARTICIPANT_PREFERENCES_SERVER
-
 async function connect(channelId: string): Promise<boolean> {
   const saved = await persistConfig(); if (!saved) return false
-  const preferences = await window.sharescreen.getParticipantPreferences(PREFERENCES_KEY)
-  if (!preferences.ok) { showNote(stageNote, `Could not load participant volumes: ${preferences.error}`, 'error'); return false }
-  participantPreferenceServer = PREFERENCES_KEY
-  participantPreferences = new Map(Object.entries(preferences.value))
+  // Volumes per person are account settings from the server (READY), by account ID.
+  const participantVolumes = Object.fromEntries(zodiak.savedPeople().map((person) => [person.user_id, person.voice_volume]))
   joiningSession = true
   const workspace = elementById('room-workspace')
   workspace.inert = true
@@ -458,7 +453,7 @@ async function connect(channelId: string): Promise<boolean> {
     await joinRoom({
       channelId,
       name: saved.displayName,
-      voice: { enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength, echoCancellation: saved.voiceEchoCancellation, autoGainControl: saved.voiceAutoGainControl, noiseGate: saved.voiceNoiseGate, autoInputSensitivity: saved.voiceAutoInputSensitivity, inputSensitivity: saved.voiceInputSensitivity, participantVolumes: Object.fromEntries([...participantPreferences].map(([id, preference]) => [id, preference.volume])) },
+      voice: { enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength, echoCancellation: saved.voiceEchoCancellation, autoGainControl: saved.voiceAutoGainControl, noiseGate: saved.voiceNoiseGate, autoInputSensitivity: saved.voiceAutoInputSensitivity, inputSensitivity: saved.voiceInputSensitivity, participantVolumes },
       media: { video, audioRack },
       hooks,
     })
@@ -471,6 +466,7 @@ async function connect(channelId: string): Promise<boolean> {
   joiningSession = false
   currentRoom = channelId
   hideLocalPreview = false
+  applySavedStreamSettings()
   clearNote(stageNote); renderRooms(); renderMembers(); renderChrome()
   zodiak.voiceChanged()
   return true
@@ -613,14 +609,13 @@ async function onStop(): Promise<void> {
 
 async function onLeave(): Promise<void> {
   leaveButton.disabled = true
-  await Promise.allSettled([...participantPreferenceWrites])
+  await zodiak.flushSettings()
   try { await window.sharescreen.setSharing(false); await leaveRoom()
   } finally { resetRoomState(); closePicker(); clearNote(stageNote); leaveButton.disabled = false; zodiak.voiceChanged(); renderChrome() }
 }
 
 function resetRoomState(): void {
-  participantPreferenceServer = null
-  participantPreferences.clear()
+  voiceMuteApplied.clear()
   setTheater(false)
   currentRoom = null; connection = 'offline'; streams = []; participants = []; selectedStreamId = null; hideLocalPreview = false; gridView = false; telemetry = {}; lastGridSignature = ''; streamVolumes.clear(); hearButton.hidden = true
 }
@@ -745,8 +740,19 @@ function syncFocusedStreamVolume(): void {
   focusedStreamVolumeValue.value = `${Math.round(value * 100)}%`
   focusedStreamVolumeValue.textContent = focusedStreamVolumeValue.value
   focusedStreamVolumeInput.title = `Volume for ${stream.participantName}: ${focusedStreamVolumeValue.value}`
+  changeStreamVolume(stream, value)
+}
+
+/** Sets and saves the screen-audio volume for the stream's owner. Moving the slider also unmutes. */
+function changeStreamVolume(stream: ScreenStream, value: number): void {
   setStreamVolume(stream.id, value)
   if (stream.muted) setStreamMuted(stream.id, false)
+  zodiak.savePerson(stream.participantId, stream.muted ? { stream_volume: value, stream_muted: false } : { stream_volume: value })
+}
+
+function muteStream(stream: ScreenStream, muted: boolean): void {
+  setStreamMuted(stream.id, muted)
+  zodiak.savePerson(stream.participantId, { stream_muted: muted })
 }
 
 function renderGrid(active: boolean): void {
@@ -796,7 +802,7 @@ function renderGrid(active: boolean): void {
         mute.innerHTML = icon(stream.muted ? 'volume-off' : 'volume')
         labelButton(mute, `${stream.muted ? 'Unmute' : 'Mute'} ${stream.participantName}`)
         mute.setAttribute('aria-pressed', String(stream.muted))
-        mute.addEventListener('click', (event) => { event.stopPropagation(); setStreamMuted(stream.id, !stream.muted) })
+        mute.addEventListener('click', (event) => { event.stopPropagation(); muteStream(stream, !stream.muted) })
         audioControls.addEventListener('pointerdown', (event) => event.stopPropagation())
         audioControls.addEventListener('click', (event) => event.stopPropagation())
         const volume = Object.assign(document.createElement('input'), { type: 'range', className: 'grid-tile-volume', min: '0', max: '200', value: String(Math.round((streamVolumes.get(stream.participantId) ?? 1) * 100)) })
@@ -812,8 +818,7 @@ function renderGrid(active: boolean): void {
           const input = event.currentTarget as HTMLInputElement
           input.title = `Volume for ${stream.participantName}: ${Math.round(value * 100)}%`
           volumeValue.value = `${Math.round(value * 100)}%`
-          setStreamVolume(stream.id, value)
-          if (stream.muted) setStreamMuted(stream.id, false)
+          changeStreamVolume(stream, value)
         }
         volume.addEventListener('input', updateVolume)
         volume.addEventListener('click', (event) => event.stopPropagation())
@@ -899,23 +904,26 @@ function renderMembers(): void {
   syncVoiceUI()
 }
 
-function rememberParticipantPreferences(people: RoomParticipant[], volume?: number): void {
-  if (!participantPreferenceServer) return
-  const updates: ParticipantPreferenceUpdate[] = []
-  for (const person of people) {
-    if (person.local) continue
-    const previous = participantPreferences.get(person.id)
-    const next = { name: person.name, volume: volume ?? previous?.volume ?? 1 }
-    if (previous?.name === next.name && previous.volume === next.volume) continue
-    participantPreferences.set(person.id, next)
-    updates.push({ id: person.id, ...next })
+/** Applies the account's saved "mute for you" when a person appears in the call. */
+function applySavedVoiceMutes(people: RoomParticipant[]): void {
+  const present = new Set(people.filter((person) => !person.local).map((person) => person.id))
+  for (const id of [...voiceMuteApplied]) if (!present.has(id)) voiceMuteApplied.delete(id)
+  for (const id of present) {
+    if (voiceMuteApplied.has(id)) continue
+    voiceMuteApplied.add(id)
+    if (zodiak.person(id).voice_muted) setVoiceParticipantMuted(id, true)
   }
-  if (!updates.length) return
-  const write = window.sharescreen.saveParticipantPreferences({ server: participantPreferenceServer, participants: updates }).then(result => {
-    if (!result.ok) throw new Error(result.error)
-  }).catch(error => showNote(stageNote, `Could not save participant volumes: ${messageOf(error)}`, 'error'))
-  participantPreferenceWrites.add(write)
-  void write.finally(() => participantPreferenceWrites.delete(write))
+}
+
+/** Screen audio is set per person, so the saved values apply before their stream starts. */
+function applySavedStreamSettings(): void {
+  for (const person of zodiak.savedPeople()) {
+    if (person.stream_volume !== 1) {
+      streamVolumes.set(person.user_id, person.stream_volume)
+      setStreamVolume(`remote:${person.user_id}`, person.stream_volume)
+    }
+    if (person.stream_muted) setStreamMuted(`remote:${person.user_id}`, true)
+  }
 }
 
 function participantAudioMember(): HTMLElement | undefined {
