@@ -37,10 +37,21 @@ export interface DesktopSourceInfo {
   thumbnail: string
 }
 
+/** Wayland has no application-side source list: the desktop portal asks the user instead. */
+export const PORTAL_SOURCE_ID = 'portal'
+
+export interface PlatformCapabilities {
+  capturePicker: 'application' | 'portal'
+  systemAudioCapture: boolean
+  discordAudioExclusion: boolean
+  /** Windows installs and Linux AppImages can download and install updates. */
+  automaticUpdates: boolean
+}
+
 export interface ShareRequest {
   sourceId: string
   withAudio: boolean
-  /** Temporarily blocks Discord audio from a system-audio share. */
+  /** Excludes Discord playback from the share; local playback is not changed. */
   blockDiscordAudio: boolean
 }
 
@@ -102,6 +113,7 @@ export type ActionResult<T> = { ok: true; value: T } | { ok: false; error: strin
 export const channels = {
   rendererReady: 'app:renderer-ready',
   getConfig: 'config:get',
+  getPlatformCapabilities: 'app:capabilities',
   saveConfig: 'config:save',
   checkForUpdates: 'update:check',
   getUpdateState: 'update:state:get',
@@ -114,6 +126,7 @@ export const channels = {
   startSystemAudio: 'audio:start',
   stopSystemAudio: 'audio:stop',
   systemAudioData: 'audio:data',
+  systemAudioError: 'audio:error',
   setWindowFullscreen: 'window:set-fullscreen',
   windowFullscreenChanged: 'window:fullscreen-changed',
   windowVisibilityChanged: 'window:visibility-changed',
@@ -124,6 +137,7 @@ export const channels = {
 export interface SharescreenApi {
   rendererReady: () => void
   getConfig: () => Promise<AppConfig>
+  getPlatformCapabilities: () => Promise<PlatformCapabilities>
   saveConfig: (config: AppConfig) => Promise<ActionResult<AppConfig>>
   checkForUpdates: (channel?: UpdateChannel) => Promise<ActionResult<true>>
   getUpdateState: () => Promise<UpdateState>
@@ -136,6 +150,7 @@ export interface SharescreenApi {
   startSystemAudio: (excludeDiscord: boolean) => Promise<ActionResult<true>>
   stopSystemAudio: () => Promise<ActionResult<true>>
   onSystemAudio: (listener: (pcm: Uint8Array) => void) => () => void
+  onSystemAudioError: (listener: (message: string) => void) => () => void
   setWindowFullscreen: (active: boolean) => Promise<ActionResult<boolean>>
   onWindowFullscreenChanged: (listener: (active: boolean) => void) => () => void
   onWindowVisibilityChanged: (listener: (visible: boolean) => void) => () => void

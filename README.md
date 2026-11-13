@@ -4,7 +4,16 @@
   <img width="96" height="96" alt="icon" src="https://github.com/user-attachments/assets/6fe87a16-b1f6-4c1d-8511-89a476d38c81" />
 </p>
 
-Zodiak is a Windows app for servers, text chat, voice chat and screen sharing. It connects to its own backend, [zodiak-api](https://github.com/1ukah/zodiak-api).
+Zodiak is a Windows and Linux app for servers, text chat, voice chat and screen sharing. It connects to its own backend, [zodiak-api](https://github.com/1ukah/zodiak-api).
+
+## Download
+
+From [the latest release](https://github.com/1ukah/zodiak/releases/latest):
+
+- Windows: `zodiak-setup.exe`.
+- Linux (x86_64): `zodiak-linux-x86_64.AppImage`. Make it executable (`chmod +x zodiak-linux-x86_64.AppImage`) and run it. Screen sharing on Wayland uses the desktop's screen picker; system audio needs PipeWire.
+
+Both versions update themselves from GitHub Releases.
 
 ## Features
 

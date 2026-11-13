@@ -6,6 +6,7 @@ import { zodiakChannels, type GatewayState, type ZodiakBridge } from '../shared/
 const api = {
   rendererReady: () => ipcRenderer.send(channels.rendererReady),
   getConfig: () => ipcRenderer.invoke(channels.getConfig),
+  getPlatformCapabilities: () => ipcRenderer.invoke(channels.getPlatformCapabilities),
   saveConfig: (config) => ipcRenderer.invoke(channels.saveConfig, config),
   checkForUpdates: (channel) => ipcRenderer.invoke(channels.checkForUpdates, channel),
   getUpdateState: () => ipcRenderer.invoke(channels.getUpdateState),
@@ -27,6 +28,13 @@ const api = {
     }
     ipcRenderer.on(channels.systemAudioData, wrapped)
     return () => ipcRenderer.removeListener(channels.systemAudioData, wrapped)
+  },
+  onSystemAudioError: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, message: unknown): void => {
+      if (typeof message === 'string') listener(message)
+    }
+    ipcRenderer.on(channels.systemAudioError, wrapped)
+    return () => ipcRenderer.removeListener(channels.systemAudioError, wrapped)
   },
   setWindowFullscreen: (active) => ipcRenderer.invoke(channels.setWindowFullscreen, active),
   onWindowFullscreenChanged: (listener) => {

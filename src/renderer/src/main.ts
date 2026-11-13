@@ -1,4 +1,4 @@
-import { shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
+import { PORTAL_SOURCE_ID, shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type PlatformCapabilities, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
 import type { User } from '../../shared/protocol'
 import { ZodiakUi } from './zodiak/ui'
 import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, setTelemetryEnabled, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session-loader'
@@ -110,6 +110,7 @@ const settingsNote = byId('settings-note', HTMLParagraphElement)
 const roomSidebar = byId('room-sidebar', HTMLElement)
 const participantGrid = elementById('participant-grid')
 let savedConfig: AppConfig | null = null
+let capabilities: PlatformCapabilities = { capturePicker: 'application', systemAudioCapture: false, discordAudioExclusion: false, automaticUpdates: false }
 let joining = false
 // Session callbacks arrive before connect() resolves. Commit their state to
 // the room UI together, instead of painting a partially joined lobby.
@@ -207,7 +208,9 @@ async function boot(): Promise<void> {
     userChanged: (user) => syncAccount(user),
     settingsFailed: (message) => showNote(currentRoom ? stageNote : listNote, message, 'error'),
   })
-  fillForm(await window.sharescreen.getConfig())
+  const [config, platformCapabilities] = await Promise.all([window.sharescreen.getConfig(), window.sharescreen.getPlatformCapabilities()])
+  capabilities = platformCapabilities
+  fillForm(config)
   bind()
   initializeUpdateUI(window.sharescreen)
   syncSystemAudioControls()
@@ -512,7 +515,20 @@ async function openPicker(): Promise<void> {
   if (!currentRoom) return
   picker.showModal(); clearNote(pickerNote); syncSystemAudioControls(); syncQualityControls()
   void loadCaptureAcceleration()
-  await loadSources()
+  // Rechecked on each open: PipeWire can start or stop while zodiak runs.
+  capabilities = await window.sharescreen.getPlatformCapabilities()
+  if (!picker.open) return
+  syncSystemAudioControls()
+  const portal = capabilities.capturePicker === 'portal'
+  sourcesEl.hidden = portal
+  refreshButton.hidden = portal
+  picker.classList.toggle('portal-picker', portal)
+  goLiveButton.title = portal ? 'Choose screen or window' : 'Start sharing'
+  goLiveButton.setAttribute('aria-label', goLiveButton.title)
+  if (portal) {
+    selectedSourceId = PORTAL_SOURCE_ID
+    updatePickerControls()
+  } else await loadSources()
 }
 
 function closePicker(): void { picker.close(); sourcesRequest++; selectedSourceId = null; clearNote(pickerNote); updatePickerControls() }
@@ -577,7 +593,8 @@ async function onGoLive(): Promise<void> {
   const quality = readQuality(); if (!quality) return
   publishing = true
   setPickerBusy(true)
-  let audioGuardArmed = false
+  const withAudio = capabilities.systemAudioCapture && audioInput.checked
+  const excludeDiscord = withAudio && capabilities.discordAudioExclusion && blockDiscordInput.checked
   try {
     if (streams.some((stream) => stream.local)) {
       await unpublishScreen()
@@ -585,18 +602,18 @@ async function onGoLive(): Promise<void> {
     }
     const armed = await window.sharescreen.prepareShare({
       sourceId: selectedSourceId,
-      withAudio: audioInput.checked,
-      blockDiscordAudio: audioInput.checked && blockDiscordInput.checked,
+      withAudio,
+      blockDiscordAudio: excludeDiscord,
       quality,
     })
     if (!armed.ok) return showNote(pickerNote, armed.error, 'error')
-    audioGuardArmed = audioInput.checked
-    await publishScreen(audioInput.checked, audioInput.checked && blockDiscordInput.checked, quality)
+    await publishScreen(withAudio, excludeDiscord, quality)
     const active = await window.sharescreen.setSharing(true)
     if (!active.ok) showNote(stageNote, active.error, 'warn')
     closePicker(); renderChrome()
   } catch (error) { showNote(pickerNote, messageOf(error), 'error')
-    if (audioGuardArmed) await window.sharescreen.setSharing(false)
+    // Also releases a capture request the portal never answered.
+    await window.sharescreen.setSharing(false)
   } finally { publishing = false; setPickerBusy(false); updatePickerControls() }
 }
 
@@ -1204,9 +1221,12 @@ function syncQualityControls(): void {
 }
 
 function syncSystemAudioControls(): void {
-  blockDiscordInput.disabled = !audioInput.checked
-  if (!audioInput.checked) blockDiscordInput.checked = false
-  blockDiscordInput.title = audioInput.checked ? 'Exclude Discord audio' : 'Enable system audio first'
+  audioInput.disabled = !capabilities.systemAudioCapture
+  if (audioInput.disabled) audioInput.checked = false
+  audioInput.title = capabilities.systemAudioCapture ? 'Share system audio' : 'System audio sharing is not available. On Linux, start PipeWire.'
+  blockDiscordInput.disabled = !capabilities.discordAudioExclusion || !audioInput.checked
+  if (blockDiscordInput.disabled) blockDiscordInput.checked = false
+  blockDiscordInput.title = !capabilities.discordAudioExclusion ? 'Discord audio exclusion is not available' : audioInput.checked ? 'Exclude Discord audio' : 'Enable system audio first'
 }
 
 function syncAudioControls(): void {
@@ -1373,6 +1393,14 @@ function fillForm(config: AppConfig): void {
   showStatistics = config.showStreamStatistics
   setTelemetryEnabled(showStatistics)
   checkForUpdatesOnStartupInput.checked = config.checkForUpdatesOnStartup
+  const updateButton = byId('check-for-updates', HTMLButtonElement)
+  checkForUpdatesOnStartupInput.disabled = !capabilities.automaticUpdates
+  updateButton.disabled = !capabilities.automaticUpdates
+  if (!capabilities.automaticUpdates) {
+    const reason = 'This build cannot update itself. Use the AppImage from GitHub Releases.'
+    checkForUpdatesOnStartupInput.title = reason
+    updateButton.title = reason
+  }
   // updateChannelInput.value = config.updateChannel === 'beta' ? 'beta' : 'stable'
   hardwareAccelerationInput.checked = config.hardwareAcceleration !== false
   showStreamStatisticsInput.checked = showStatistics

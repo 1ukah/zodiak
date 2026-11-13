@@ -239,15 +239,20 @@ export async function publishScreen(withAudio: boolean, excludeDiscord: boolean,
     video = stream.getVideoTracks()[0] ?? null
     if (!video || video.readyState !== 'live') throw new Error('Screen share did not start. Choose a screen and try again.')
     video.contentHint = preference.contentHint
-    // Chromium loopback is already mixed. Send the protected WASAPI process-loopback
-    // track instead, so this app's own audio cannot feed back.
-    if (withAudio) protectedAudio = await openSystemAudioTrack(excludeDiscord)
+    // Chromium loopback is already mixed. Send the platform helper's track instead
+    // (WASAPI process loopback or PipeWire), so this app's own audio cannot feed back.
+    if (withAudio) protectedAudio = await openSystemAudioTrack(excludeDiscord, (message) => {
+      if (connection !== current) return
+      hooks?.onError(`Screen audio stopped: ${message}`)
+      void Promise.all([closeSystemAudio(), current.stopScreenAudio()]).catch(() => undefined)
+    })
     await current.startScreen(video, protectedAudio, {
       maxBitrate: shareBitrateFor(quality),
       maxFramerate: quality.frameRate,
       degradationPreference: preference.degradationPreference,
     })
     if (connection !== current || video.readyState !== 'live') throw new Error('The shared screen or window closed before sharing started.')
+    if (protectedAudio && protectedAudio.readyState !== 'live') throw new Error('System audio capture stopped before sharing started.')
     localScreen = video
     localScreenTargetBitrate = shareBitrateFor(quality)
     const shared = video

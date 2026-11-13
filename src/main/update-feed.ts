@@ -23,7 +23,9 @@ export async function getUpdateFeed(channel: UpdateChannel) {
       if (!isRecord(release) || release.draft || release.prerelease !== true || typeof release.tag_name !== 'string') continue
       if (!/^v?\d+\.\d+\.\d+-beta(?:\.\d+)*$/.test(release.tag_name)) continue
       const assets = Array.isArray(release.assets) ? release.assets : []
-      if (!assets.some(asset => isRecord(asset) && asset.name === 'beta.yml')) {
+      // electron-updater reads beta.yml on Windows and beta-linux.yml on Linux.
+      const manifest = process.platform === 'linux' ? 'beta-linux.yml' : 'beta.yml'
+      if (!assets.some(asset => isRecord(asset) && asset.name === manifest)) {
         throw new Error('The latest Beta release is missing its update manifest. Try again after it finishes publishing.')
       }
       return {

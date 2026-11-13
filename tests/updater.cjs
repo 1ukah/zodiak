@@ -17,7 +17,7 @@ async function main() {
       const result = await build({ entryPoints: [path.join(root, `src/main/${name}.ts`)], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['electron', 'electron-updater'] })
       return result.outputFiles[0].text
     }))
-    function harness({ packaged = true, version = '1.1.0', releases = [betaRelease], responseStatus = 200 } = {}) {
+    function harness({ packaged = true, version = '1.1.0', releases = [betaRelease], responseStatus = 200, platform = 'win32', env = {} } = {}) {
       const updater = new EventEmitter()
       const checks = [], requests = [], states = [], progress = []
       let downloads = 0, installed = 0, installArguments
@@ -42,7 +42,7 @@ async function main() {
       }
       function load(bundle) {
         const module = { exports: {} }
-        new Function('require', 'module', 'exports', bundle)(id => id === 'electron' ? electron : id === 'electron-updater' ? { autoUpdater: updater } : require(id), module, module.exports)
+        new Function('require', 'module', 'exports', 'process', bundle)(id => id === 'electron' ? electron : id === 'electron-updater' ? { autoUpdater: updater } : require(id), module, module.exports, { ...process, platform, env })
         return module.exports
       }
       const api = load(bundles[0]), config = load(bundles[1])
@@ -210,6 +210,37 @@ async function main() {
     await assert.rejects(h.api.performUpdateAction('download'), /installed zodiak build/)
     assert.equal(h.requests.length, 0)
     console.log('PASS Disabled startup checks and development builds skip network/install actions')
+
+    h = harness({ platform: 'linux', env: { APPIMAGE: '/home/user/Applications/zodiak-linux-x86_64.AppImage' } })
+    h.setCandidate('1.2.0')
+    await h.api.requestUpdateCheck(true, 'stable')
+    assert.equal(h.checks[0].feed.provider, 'github')
+    assert.equal(h.checks[0].channel, 'latest')
+    assert.equal(h.state.phase, 'available')
+    await h.api.performUpdateAction('download')
+    await h.api.performUpdateAction('install')
+    assert.equal(h.installed, 1)
+    h = harness({ platform: 'linux', env: { APPIMAGE: '/tmp/zodiak.AppImage' }, releases: [{ ...betaRelease, assets: [{ name: 'beta.yml' }] }] })
+    await h.api.requestUpdateCheck(true, 'beta')
+    assert.equal(h.state.phase, 'error', 'Linux Beta needs beta-linux.yml, not the Windows manifest')
+    h = harness({ platform: 'linux', env: { APPIMAGE: '/tmp/zodiak.AppImage' }, releases: [{ ...betaRelease, assets: [{ name: 'beta-linux.yml' }] }] })
+    await h.api.requestUpdateCheck(true, 'beta')
+    assert.match(h.checks[0].feed.url, /\/v1\.2\.0-beta\/$/)
+    const linuxProvider = new GenericProvider(h.checks[0].feed, h.updater, { platform: 'linux', executor: null })
+    let linuxManifest
+    linuxProvider.httpRequest = async url => { linuxManifest = url; return 'version: 1.2.0-beta\nfiles: []\n' }
+    await linuxProvider.getLatestVersion()
+    assert.equal(linuxManifest.pathname.split('/').pop(), 'beta-linux.yml')
+    console.log('PASS Linux AppImage checks, downloads and installs updates with the Linux manifests')
+
+    h = harness({ platform: 'linux' })
+    await h.api.checkForUpdatesOnStartup()
+    await assert.rejects(h.api.requestUpdateCheck(true), /cannot update itself/)
+    await assert.rejects(h.api.performUpdateAction('install'), /cannot update itself/)
+    assert.equal(h.requests.length, 0)
+    assert.equal(h.checks.length, 0)
+    assert.equal(h.state.phase, 'idle')
+    console.log('PASS Linux builds outside an AppImage skip update feeds, downloads and installers')
   } finally {
     assert.equal(path.dirname(profile), path.resolve(os.tmpdir()))
     assert.ok(path.basename(profile).startsWith('zodiak-updater-'))

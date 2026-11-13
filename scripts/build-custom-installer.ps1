@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-  [switch]$Publish
+  [switch]$Publish,
+  # Folder with zodiak-linux-x86_64.AppImage and its latest-linux.yml/beta-linux.yml,
+  # built on Linux. They are uploaded with the Windows files, before the release is public.
+  [string]$LinuxAssets
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +23,18 @@ $releaseBranch = if ($isBeta) { 'beta' } else { 'master' }
 $manifestName = if ($isBeta) { 'beta.yml' } else { 'latest.yml' }
 $updateManifest = Join-Path $projectRoot "dist/$manifestName"
 $assemblyVersion = $displayVersion.Split('-')[0]
+$linuxFiles = @()
+if ($LinuxAssets) {
+  $linuxManifestName = if ($isBeta) { 'beta-linux.yml' } else { 'latest-linux.yml' }
+  $linuxFiles = @('zodiak-linux-x86_64.AppImage', $linuxManifestName) | ForEach-Object { Join-Path $LinuxAssets $_ }
+  foreach ($file in $linuxFiles) {
+    if (-not (Test-Path -LiteralPath $file)) { throw "The Linux release file $file is missing." }
+  }
+  $linuxManifest = Get-Content -LiteralPath $linuxFiles[1] -Raw
+  if ($linuxManifest -notmatch "(?m)^version: $([regex]::Escape($displayVersion))\s*$") {
+    throw "$linuxManifestName is not for version $displayVersion."
+  }
+}
 
 if ($Publish) {
   # A tag existing on GitHub must identify the exact source being packaged.
@@ -99,7 +114,7 @@ releaseDate: '$releaseDate'
         throw 'GitHub release creation failed.'
       }
     }
-    & gh release upload $tag $publicInstaller $updateManifest --clobber
+    & gh release upload $tag $publicInstaller $updateManifest @linuxFiles --clobber
     if ($LASTEXITCODE -ne 0) {
       throw 'GitHub release upload failed.'
     }

@@ -2,8 +2,9 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, powerSaveBlocke
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { channels, shareBitrateRangeFor, supportsShareQuality, type CaptureAccelerationStatus, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareResolution, type ShareStartRequest } from '../shared/types'
-import { armCapture, listSources, registerCaptureHandler } from './capture'
-import { startSystemAudio, stopSystemAudio } from './system-audio'
+import { armCapture, cancelCapture, listSources, registerCaptureHandler, validateCaptureRequest } from './capture'
+import { getPlatformCapabilities } from './platform'
+import { startSystemAudio, stopSystemAudio, systemAudioAvailable } from './system-audio'
 import { hardwareAccelerationEnabledSync, loadConfig, saveConfig } from './config'
 import { removeLegacyData } from './legacy-data'
 import { isRecord } from './parse'
@@ -22,10 +23,12 @@ app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling')
 // one (and its reload/devtools accelerators) in installed builds.
 if (app.isPackaged) Menu.setApplicationMenu(null)
 
-// Installed builds keep every app-managed file next to the executable, inside
-// the directory the user selected in the installer. Development keeps its
-// isolated profile so tests and local work never touch an installed profile.
-if (app.isPackaged) {
+// Installed Windows builds keep every app-managed file next to the executable,
+// inside the directory the user selected in the installer. The Linux AppImage
+// is a read-only image, so it keeps Electron's user folder (~/.config/zodiak).
+// Development keeps its isolated profile so tests and local work never touch an
+// installed profile.
+if (app.isPackaged && process.platform === 'win32') {
   const dataDirectory = join(process.resourcesPath, '..', 'data')
   app.setPath('userData', dataDirectory)
   app.setPath('sessionData', join(dataDirectory, 'session'))
@@ -196,7 +199,7 @@ function createWindow(splash: BrowserWindow | null = null): void {
     if (!startupUpdateCheckScheduled) {
       startupUpdateCheckScheduled = true
       void loadConfig().then(async config => {
-        if (app.isPackaged && config.checkForUpdatesOnStartup) await (await loadUpdater()).checkForUpdatesOnStartup()
+        if (app.isPackaged && getPlatformCapabilities().automaticUpdates && config.checkForUpdatesOnStartup) await (await loadUpdater()).checkForUpdatesOnStartup()
       }).catch(error => console.warn('Could not check for updates:', error))
     }
   }
@@ -215,8 +218,12 @@ function createWindow(splash: BrowserWindow | null = null): void {
     void dialog.showMessageBox(win, { type: 'error', title: 'Startup is taking longer than expected', message: 'zodiak could not finish starting.', detail: 'Close the app and try opening it again.' })
   }, 20_000)
   win.once('ready-to-show', () => { painted = true; showWindow() })
+  // Wayland can defer painting hidden surfaces. The readiness handshake still
+  // prevents showing the interface before its settings and controls are ready.
+  if (process.platform === 'linux') win.webContents.once('did-finish-load', () => { painted = true; showWindow() })
 
   win.on('closed', () => {
+    cancelCapture()
     clearTimeout(startupTimeout)
     ipcMain.removeListener(channels.rendererReady, onRendererReady)
     if (splash && !splash.isDestroyed()) splash.close()
@@ -270,6 +277,7 @@ function parseShareRequest(value: unknown): ShareStartRequest {
     throw new Error('The fixed bitrate must be within the selected quality range')
   }
   if (value.blockDiscordAudio && !value.withAudio) throw new Error('Discord blocking requires system audio')
+  validateCaptureRequest({ sourceId: value.sourceId, withAudio: value.withAudio, blockDiscordAudio: value.blockDiscordAudio })
   return {
     sourceId: value.sourceId,
     withAudio: value.withAudio,
@@ -308,11 +316,16 @@ function captureAccelerationStatus(): CaptureAccelerationStatus {
 }
 
 function registerIpc(): void {
+  ipcMain.handle(channels.getPlatformCapabilities, async () => {
+    const capabilities = getPlatformCapabilities()
+    const audio = capabilities.systemAudioCapture && await systemAudioAvailable()
+    return { ...capabilities, systemAudioCapture: audio, discordAudioExclusion: audio }
+  })
   ipcMain.handle(channels.getConfig, () => loadConfig())
   ipcMain.handle(channels.saveConfig, (event, payload: unknown) => settle(async () => {
     const previous = await loadConfig()
     const saved = await saveConfig(payload)
-    if (app.isPackaged && saved.updateChannel !== previous.updateChannel) {
+    if (app.isPackaged && getPlatformCapabilities().automaticUpdates && saved.updateChannel !== previous.updateChannel) {
       // Saving stays independent of network failures or a pending update prompt.
       void loadUpdater().then(updater => updater.requestUpdateCheck(true, saved.updateChannel))
         .catch(error => console.warn('Could not check the selected update channel:', error))
@@ -336,7 +349,7 @@ function registerIpc(): void {
   ipcMain.handle(channels.prepareShare, (_event, payload: unknown) =>
     settle(async () => {
       const request = parseShareRequest(payload)
-      // System audio always uses the protected WASAPI track, which excludes
+      // Audio is captured separately by the platform helper, which excludes
       // this app's process tree and prevents remote stream audio from looping.
       armCapture({ ...request, withAudio: false })
       return true as const
@@ -347,7 +360,7 @@ function registerIpc(): void {
     settle(async () => {
       if (typeof payload !== 'boolean') throw new Error('Invalid share state')
       setSleepBlock(payload)
-      if (!payload) stopSystemAudio()
+      if (!payload) { cancelCapture(); stopSystemAudio() }
       return true as const
     }),
   )
@@ -415,16 +428,23 @@ if (primaryInstance) app.whenReady().then(() => {
   createTray()
   const splash = createSplash()
   // Let the small splash paint before loading the main renderer and its modules.
-  splash.once('ready-to-show', () => {
+  let splashStarted = false
+  const showSplash = (): void => {
+    if (splashStarted || splash.isDestroyed()) return
+    splashStarted = true
     splash.show()
     createWindow(splash)
-  })
+  }
+  splash.once('ready-to-show', showSplash)
+  // A hidden Wayland surface can wait for a compositor frame until it is mapped.
+  if (process.platform === 'linux') splash.webContents.once('did-finish-load', showSplash)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
 app.on('window-all-closed', () => {
+  cancelCapture()
   setSleepBlock(false)
   stopSystemAudio()
   stopZodiak()

@@ -1,10 +1,13 @@
 import { app, BrowserWindow } from 'electron'
 import electronUpdater, { type ProgressInfo } from 'electron-updater'
 import { loadConfig, requireUpdateChannel } from './config'
+import { getPlatformCapabilities } from './platform'
 import { getUpdateFeed } from './update-feed'
 import { channels, type UpdateChannel, type UpdateState } from '../shared/types'
 
+// Windows uses the NSIS updater and the custom setup; Linux uses the AppImage updater.
 const { autoUpdater } = electronUpdater
+const UNSUPPORTED_BUILD = 'This Linux build cannot update itself. Download the AppImage from GitHub Releases to get automatic updates.'
 let getWindow: () => BrowserWindow | null = () => null
 let updateCheckInFlight = false
 let manualCheckRequested = false
@@ -44,6 +47,7 @@ export async function performUpdateAction(action: unknown): Promise<void> {
     throw new Error('Invalid update action')
   }
   if (!app.isPackaged) throw new Error('Updates are available only in an installed zodiak build')
+  if (!getPlatformCapabilities().automaticUpdates) throw new Error(UNSUPPORTED_BUILD)
   if (action === 'dismiss') {
     if (state.phase === 'downloading' || state.phase === 'installing' || state.phase === 'checking') return
     // A ready installer remains tied to its channel and can be reopened later.
@@ -59,7 +63,8 @@ export async function performUpdateAction(action: unknown): Promise<void> {
   if ((action === 'install' && state.phase === 'downloaded') ||
       (action === 'retry' && state.phase === 'error' && state.retry === 'install')) {
     publish({ phase: 'installing', visible: true, version: state.version })
-    // The downloaded WPF setup shows its update window; the embedded NSIS stays silent.
+    // Windows: the downloaded WPF setup shows its update window; the embedded NSIS stays silent.
+    // Linux: the new AppImage replaces the running one, then zodiak restarts.
     try { autoUpdater.quitAndInstall(true, true) }
     catch (error) {
       console.warn('Could not start zodiak update installer:', error)
@@ -77,7 +82,7 @@ export async function performUpdateAction(action: unknown): Promise<void> {
 /** Configures the packaged-app updater once Electron is ready. */
 export function initializeUpdater(windowProvider: () => BrowserWindow | null): void {
   getWindow = windowProvider
-  if (!app.isPackaged) return
+  if (!app.isPackaged || !getPlatformCapabilities().automaticUpdates) return
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
   // Published releases contain the complete custom setup, without blockmaps.
@@ -111,6 +116,10 @@ export function initializeUpdater(windowProvider: () => BrowserWindow | null): v
 export async function requestUpdateCheck(manual = false, requestedChannel?: unknown): Promise<void> {
   if (!app.isPackaged) {
     if (manual) throw new Error('Updates are available only in an installed zodiak build')
+    return
+  }
+  if (!getPlatformCapabilities().automaticUpdates) {
+    if (manual) throw new Error(UNSUPPORTED_BUILD)
     return
   }
   const pending = ['available', 'downloading', 'downloaded', 'installing'].includes(state.phase) ||

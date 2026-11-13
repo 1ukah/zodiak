@@ -213,6 +213,16 @@ export class MediaConnection {
     await transceiver.sender.setParameters(parameters).catch(() => undefined)
   }
 
+  /** Removes only the screen audio, keeping the screen video live. */
+  async stopScreenAudio(): Promise<void> {
+    const transceiver = this.screenAudio
+    this.screenAudio = null
+    if (!transceiver || isStopped(transceiver)) return
+    transceiver.sender.track?.stop()
+    transceiver.stop()
+    if (!this.closed) await this.renegotiate()
+  }
+
   async stopScreen(renegotiate = true): Promise<void> {
     const had = Boolean(this.screenVideo || this.screenAudio)
     for (const transceiver of [this.screenVideo, this.screenAudio]) {

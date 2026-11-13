@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "productName": "zodiak",
+  "description": "Screen sharing, voice chat, and text chat.",
+  "homepage": "https://github.com/1ukah/zodiak",
+  "author": "1ukah",
+  "desktopName": "zodiak.desktop",
   "repository": {
     "type": "git",
     "url": "https://github.com/1ukah/zodiak.git"
@@ -11,8 +15,8 @@
   "main": "./out/main/index.js",
   "scripts": {
     "postinstall": "node ./node_modules/electron/install.js",
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "node scripts/prepare-native-audio.cjs && electron-vite dev",
+    "build": "node scripts/prepare-native-audio.cjs && electron-vite build",
     "start": "electron-vite preview",
     "build:system-audio-capture": "dotnet publish native/system-audio-capture/SystemAudioCapture.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o native/system-audio-capture/publish",
     "version:sync": "node scripts/sync-version.cjs",
@@ -20,11 +24,16 @@
     "test:unit": "vitest run",
     "pack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-installer.ps1",
     "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-installer.ps1 -Publish",
+    "pack:linux": "npm run version:sync && npm run build && electron-builder --linux AppImage --publish never",
+    "pack:linux:dir": "npm run version:sync && npm run build && electron-builder --linux dir --publish never",
+    "build:pipewire-audio": "node scripts/build-pipewire-audio.cjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:updater": "node tests/updater.cjs",
     "test:update-ui": "electron tests/update-ui.cjs",
     "test:installer": "dotnet run --project tests/installer-update/InstallerUpdateTests.csproj -c Release",
     "test:pcm": "node tests/system-audio-processor.cjs",
+    "test:capture": "node tests/linux-capture.cjs && node tests/system-audio-main.cjs && node tests/system-audio-renderer.cjs",
+    "test:pipewire": "npm run build:pipewire-audio && node tests/pipewire-audio.cjs",
     "test:noise": "node tests/noise-suppression.cjs && node tests/noise-gate.cjs",
     "test:loopback": "electron tests/microphone-loopback.cjs",
     "test:startup": "npm run build && electron tests/startup-smoke.cjs",
@@ -37,6 +46,9 @@
     "executableName": "zodiak",
     "asar": true,
     "npmRebuild": false,
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
     "directories": {
       "output": "dist"
     },
@@ -54,10 +66,6 @@
     ],
     "extraResources": [
       {
-        "from": "build/icon.ico",
-        "to": "app-icon.ico"
-      },
-      {
         "from": "build/icon.png",
         "to": "app-icon.png"
       },
@@ -72,20 +80,47 @@
       {
         "from": "build/zodiak-ca.pem",
         "to": "zodiak-ca.pem"
-      },
-      {
-        "from": "native/system-audio-capture/publish/SystemAudioCapture.exe",
-        "to": "system-audio-capture/SystemAudioCapture.exe"
       }
     ],
     "win": {
       "icon": "build/icon.ico",
+      "extraResources": [
+        {
+          "from": "build/icon.ico",
+          "to": "app-icon.ico"
+        },
+        {
+          "from": "native/system-audio-capture/publish/SystemAudioCapture.exe",
+          "to": "system-audio-capture/SystemAudioCapture.exe"
+        }
+      ],
       "target": [
         {
           "target": "nsis",
           "arch": [
             "x64"
           ]
+        }
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Network",
+      "maintainer": "1ukah",
+      "syncDesktopName": true,
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "zodiak-linux-${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": "native/pipewire-audio/publish/zodiak-pipewire-audio",
+          "to": "pipewire-audio/zodiak-pipewire-audio"
         }
       ]
     },
