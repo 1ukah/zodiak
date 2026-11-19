@@ -139,6 +139,10 @@ let screenControlsTimer: number | null = null
 // Keyed by participant: a re-shared screen is a new stream but keeps the same
 // audio level in the session, so the sliders must show that level too.
 const streamVolumes = new Map<string, number>()
+const STREAM_ORDER_KEY = 'zodiak.streamOrder'
+/** Participant IDs in the order the user arranged the overview tiles. */
+let streamOrder: string[] = loadStreamOrder()
+let draggedTileId: string | null = null
 /** People in voice whose saved "mute for you" was already applied in this call. */
 const voiceMuteApplied = new Set<string>()
 let zodiak: ZodiakUi
@@ -333,6 +337,7 @@ function bind(): void {
     if (streams.length && participants.length > 1) { gridView = true; renderChrome() }
   })
   focusedStreamVolumeInput.addEventListener('input', syncFocusedStreamVolume)
+  for (const slider of [focusedStreamVolumeInput, participantAudioSlider, audioVolumeInput, voiceInputVolume]) fineTuneOnWheel(slider)
   // These overlays sit above a clickable video. Stop the whole pointer/click
   // sequence here so no control interaction can also switch to the grid.
   for (const eventName of ['pointerdown', 'click']) focusedStreamVolume.addEventListener(eventName, (event) => event.stopPropagation())
@@ -775,7 +780,7 @@ function muteStream(stream: ScreenStream, muted: boolean): void {
 function renderGrid(active: boolean): void {
   const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
   const visibleParticipants = participants.filter((participant) => !hideLocalPreview || !participant.local)
-  const signature = active ? JSON.stringify({ participants: visibleParticipants, streams: visibleStreams.map((stream) => [stream.id, stream.subscribed, stream.muted, streamVolumes.get(stream.participantId) ?? 1]) }) : ''
+  const signature = active ? JSON.stringify({ order: streamOrder, participants: visibleParticipants, streams: visibleStreams.map((stream) => [stream.id, stream.subscribed, stream.muted, streamVolumes.get(stream.participantId) ?? 1]) }) : ''
   if (signature === lastGridSignature) return
   lastGridSignature = signature
   if (!active) {
@@ -787,6 +792,14 @@ function renderGrid(active: boolean): void {
   const targets = new Map<string, HTMLVideoElement>()
   const tiles = document.createDocumentFragment()
   const orderedParticipants = [...visibleParticipants].sort((left, right) => {
+    // A position the user chose wins; everyone else keeps the automatic order after them.
+    const leftIndex = streamOrder.indexOf(left.id)
+    const rightIndex = streamOrder.indexOf(right.id)
+    if (leftIndex !== -1 || rightIndex !== -1) {
+      if (leftIndex === -1) return 1
+      if (rightIndex === -1) return -1
+      return leftIndex - rightIndex
+    }
     const rank = (participant: RoomParticipant): number => {
       const stream = visibleStreams.find((candidate) => candidate.participantId === participant.id)
       return stream?.subscribed ? 0 : stream ? 1 : 2
@@ -795,15 +808,18 @@ function renderGrid(active: boolean): void {
     if (group !== 0) return group
     return compareParticipants(left, right)
   })
+  const tileOrder = orderedParticipants.map((person) => person.id)
   for (const participant of orderedParticipants) {
     const stream = visibleStreams.find((candidate) => candidate.participantId === participant.id)
     const tile = Object.assign(document.createElement('article'), { className: 'grid-tile' })
     if (stream) tile.dataset.streamId = stream.id
+    bindTileReorder(tile, participant.id, tileOrder)
     if (stream && stream.subscribed) {
       tile.classList.add('is-stream')
       tile.tabIndex = 0
       tile.setAttribute('role', 'button')
       tile.setAttribute('aria-label', `Focus ${stream.participantName}'s screen`)
+      tile.title = 'Drag or press Alt+Left/Right to reorder'
       const focus = () => { gridView = false; selectedStreamId = stream.id; watchStream(stream.id); selectStream(stream.id); renderChrome() }
       tile.addEventListener('click', focus)
       tile.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); focus() } })
@@ -838,6 +854,7 @@ function renderGrid(active: boolean): void {
           changeStreamVolume(stream, value)
         }
         volume.addEventListener('input', updateVolume)
+        fineTuneOnWheel(volume)
         volume.addEventListener('click', (event) => event.stopPropagation())
         audioControls.append(volume, volumeValue, mute)
         const hideControls = Object.assign(document.createElement('div'), { className: 'grid-stream-hide-control' })
@@ -875,6 +892,79 @@ function renderGrid(active: boolean): void {
   streamGrid.replaceChildren(tiles)
   gridVideos = targets
   setGridVideos(targets)
+}
+
+/** Lets the overview tiles be rearranged by dragging, or with Alt+Arrow keys. */
+function bindTileReorder(tile: HTMLElement, id: string, order: string[]): void {
+  tile.dataset.participantId = id
+  tile.draggable = true
+  // Dragging a volume slider must move the slider, not the tile.
+  tile.addEventListener('pointerdown', (event) => {
+    tile.draggable = !(event.target instanceof Element && event.target.closest('.grid-stream-audio-controls, .grid-stream-hide-control, .stream-viewers'))
+  }, true)
+  tile.addEventListener('dragstart', (event) => {
+    draggedTileId = id
+    event.dataTransfer?.setData('text/plain', id)
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+    tile.classList.add('is-dragging')
+  })
+  tile.addEventListener('dragend', () => {
+    draggedTileId = null
+    tile.draggable = true
+    for (const node of streamGrid.querySelectorAll('.is-dragging, .drop-before, .drop-after')) node.classList.remove('is-dragging', 'drop-before', 'drop-after')
+  })
+  const after = (event: DragEvent): boolean => {
+    const bounds = tile.getBoundingClientRect()
+    return event.clientX > bounds.left + bounds.width / 2
+  }
+  tile.addEventListener('dragover', (event) => {
+    if (!draggedTileId || draggedTileId === id) return
+    event.preventDefault()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+    const placeAfter = after(event)
+    tile.classList.toggle('drop-after', placeAfter)
+    tile.classList.toggle('drop-before', !placeAfter)
+  })
+  tile.addEventListener('dragleave', (event) => {
+    if (event.relatedTarget instanceof Node && tile.contains(event.relatedTarget)) return
+    tile.classList.remove('drop-before', 'drop-after')
+  })
+  tile.addEventListener('drop', (event) => {
+    if (!draggedTileId || draggedTileId === id) return
+    event.preventDefault()
+    const moved = draggedTileId
+    const next = order.filter((candidate) => candidate !== moved)
+    next.splice(next.indexOf(id) + (after(event) ? 1 : 0), 0, moved)
+    saveStreamOrder(next)
+    renderChrome()
+  })
+  tile.addEventListener('keydown', (event) => {
+    if (!event.altKey || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return
+    event.preventDefault()
+    event.stopPropagation()
+    const index = order.indexOf(id)
+    const target = index + (event.key === 'ArrowLeft' ? -1 : 1)
+    if (index === -1 || target < 0 || target >= order.length) return
+    const next = [...order]
+    next.splice(index, 1)
+    next.splice(target, 0, id)
+    saveStreamOrder(next)
+    renderChrome()
+    streamGrid.querySelector<HTMLElement>(`[data-participant-id="${CSS.escape(id)}"]`)?.focus()
+  })
+}
+
+function loadStreamOrder(): string[] {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(STREAM_ORDER_KEY) ?? '[]')
+    return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []
+  } catch { return [] }
+}
+
+/** Puts the arranged tiles first, keeping earlier positions of people not in this call. */
+function saveStreamOrder(arranged: string[]): void {
+  streamOrder = [...arranged, ...streamOrder.filter((id) => !arranged.includes(id))].slice(0, 200)
+  try { localStorage.setItem(STREAM_ORDER_KEY, JSON.stringify(streamOrder)) } catch { /* Order stays for this session. */ }
 }
 
 function compareParticipants(left: RoomParticipant, right: RoomParticipant): number {
@@ -1512,6 +1602,22 @@ function showNote(note: HTMLParagraphElement, message: string, tone: 'error' | '
   }
 }
 function clearNote(note: HTMLParagraphElement): void { note.hidden = true; note.textContent = ''; delete note.dataset.tone }
+/**
+ * Short sliders cover 0–200% in fewer pixels than steps, so dragging skips
+ * values. The wheel moves one step per notch to reach any exact percentage.
+ */
+function fineTuneOnWheel(input: HTMLInputElement): void {
+  input.addEventListener('wheel', (event) => {
+    if (input.disabled || event.deltaY === 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const step = Number(input.step) || 1
+    const next = Math.max(Number(input.min) || 0, Math.min(Number(input.max) || 100, input.valueAsNumber + (event.deltaY < 0 ? step : -step)))
+    if (next === input.valueAsNumber) return
+    input.value = String(next)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  }, { passive: false })
+}
 function messageOf(error: unknown): string { return error instanceof Error && error.message ? error.message : 'Something went wrong' }
 function byId<T extends HTMLElement>(id: string, ctor: new () => T): T { const found = document.getElementById(id); if (!(found instanceof ctor)) throw new Error(`Missing #${id}`); return found }
 function elementById(id: string): HTMLElement { const found = document.getElementById(id); if (!(found instanceof HTMLElement)) throw new Error(`Missing #${id}`); return found }

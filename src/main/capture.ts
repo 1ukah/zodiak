@@ -66,13 +66,33 @@ export async function listSources(): Promise<DesktopSourceInfo[]> {
     fetchWindowIcons: false,
   })
   return sources
-    .filter((source) => !isOwnWindow(source.name))
+    .filter((source) => !isOwnWindow(source.name) && !isHiddenHelperWindow(source))
     .sort(compareSources)
     .map(toInfo)
 }
 
 function isOwnWindow(name: string): boolean {
   return name === 'zodiak' || name.startsWith('zodiak')
+}
+
+/**
+ * Background apps (Razer Synapse, overlays, input methods) own invisible
+ * windows that Windows still reports as capturable. Sharing one shows nothing.
+ */
+const HIDDEN_HELPER_WINDOWS = [
+  /^Rz[A-Za-z]*Window$/, // Razer Synapse, e.g. RzMonitorForegroundWindow
+  /^NVIDIA GeForce Overlay$/i,
+  /^AMD DVR Overlay$/i,
+  /^Program Manager$/,
+  /^(Default IME|MSCTFIME UI)$/,
+  /^Windows Input Experience$/,
+  /^Microsoft Text Input Application$/,
+]
+
+function isHiddenHelperWindow(source: Pick<DesktopCapturerSource, 'id' | 'name'>): boolean {
+  if (!source.id.startsWith('window:')) return false
+  const name = source.name.trim()
+  return HIDDEN_HELPER_WINDOWS.some((pattern) => pattern.test(name))
 }
 
 function compareSources(a: DesktopCapturerSource, b: DesktopCapturerSource): number {

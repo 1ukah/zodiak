@@ -2148,6 +2148,15 @@ body.in-room #shell {
   border-color: var(--accent);
   outline: none;
 }
+.grid-tile.is-dragging {
+  opacity: .45;
+}
+#stream-grid .grid-tile.drop-before {
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+#stream-grid .grid-tile.drop-after {
+  box-shadow: inset -4px 0 0 var(--accent);
+}
 .grid-tile.is-participant {
   display: grid;
   place-items: center;
@@ -2534,6 +2543,8 @@ body.signed-out #shell { display: none; }
 #auth-submit, #auth-retry { width: 100%; justify-content: center; }
 
 body.has-guild #shell { grid-template-columns: 68px 224px minmax(0,1fr); }
+/* Focus view and fullscreen hide the rail and sidebar; the stage takes the whole row. */
+body.theater #shell, body.theater.has-guild #shell { grid-template-columns: minmax(0,1fr); }
 .guild-header { display: flex; align-items: center; gap: 4px; height: 56px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--line); flex: none; }
 .guild-header h2 { flex: 1; min-width: 0; margin: 0; font-size: 14px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .guild-header .icon-button { width: 30px; height: 30px; flex: none; }
