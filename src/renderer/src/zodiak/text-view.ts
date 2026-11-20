@@ -2,6 +2,7 @@ import type { Id, Message } from '../../../shared/protocol'
 import { makeAvatar } from '../avatar'
 import { icon, labelButton } from '../icons'
 import { api, errorText } from './api'
+import { MentionAutocomplete, mentionsUser, withMentions } from './mentions'
 import type { ZodiakStore } from './store'
 
 const PAGE = 50
@@ -49,8 +50,11 @@ export class TextChannelView {
   private readonly input = el('text-input', HTMLTextAreaElement)
   private readonly note = el('text-note', HTMLParagraphElement)
   private readonly title = el('text-title', HTMLHeadingElement)
+  private readonly mentions: MentionAutocomplete
 
   constructor(private readonly store: ZodiakStore, private readonly confirm: Confirm) {
+    // Registered before the send handler below, so Enter can pick a suggestion first.
+    this.mentions = new MentionAutocomplete(this.input, this.form, () => this.members(), () => this.store.user?.id)
     store.subscribe((change) => {
       if (!this.channelId) return
       if (change.kind === 'all' || (change.kind === 'messages' && change.channelId === this.channelId)) this.render()
@@ -66,7 +70,14 @@ export class TextChannelView {
 
   close(): void {
     this.channelId = null
+    this.mentions.close()
     this.log.replaceChildren()
+  }
+
+  /** Members of the open channel's server: the people who can be mentioned. */
+  private members() {
+    const guildId = this.store.channel(this.channelId)?.guild_id ?? null
+    return this.store.guild(guildId)?.members ?? []
   }
 
   open(channelId: Id | null): void {
@@ -74,6 +85,7 @@ export class TextChannelView {
     this.channelId = channelId
     this.editing = null
     this.note.hidden = true
+    this.mentions.close()
     if (!channelId) { this.log.replaceChildren(); return }
     this.title.textContent = this.store.channel(channelId)?.name ?? ''
     this.input.placeholder = `Message #${this.store.channel(channelId)?.name ?? ''}`
@@ -184,7 +196,10 @@ export class TextChannelView {
       return row
     }
     const content = Object.assign(document.createElement('div'), { className: 'chat-message-text' })
-    content.append(...linkify(message.content))
+    const members = this.members()
+    const self = this.store.user?.id
+    content.append(...withMentions(linkify(message.content), members, self))
+    if (self && !mine && mentionsUser(message.content, members, self)) row.classList.add('is-mentioned')
     if (message.edited_at) content.append(Object.assign(document.createElement('span'), { className: 'text-edited', textContent: ' (edited)' }))
     row.append(content)
     if (mine || canDelete) {

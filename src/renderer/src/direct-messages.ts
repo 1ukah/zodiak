@@ -1,6 +1,5 @@
 import type { DirectMessage, Id } from '../../shared/protocol'
 import { icon, labelButton } from './icons'
-import type { RoomParticipant } from './session'
 
 export const CHAT_MAX_LENGTH = 2_000
 
@@ -28,8 +27,10 @@ export interface DirectMessageHooks {
   avatar: (name: string) => HTMLElement
   /** The signed-in user's ID. */
   self: () => Id | null
-  /** True while the person can receive messages (they share a server with the user). */
-  reachable: (id: Id) => boolean
+  /** The current display name of someone who shares a server with the user. */
+  nameOf: (id: Id) => string | undefined
+  /** The chat area shows a conversation (`true`) or the text channel (`false`). */
+  onShow: (conversation: boolean) => void
   onUnread: () => void
 }
 
@@ -50,30 +51,32 @@ export function toChatMessage(message: DirectMessage, self: Id | null): ChatMess
 }
 
 /**
- * Private messages with people in the voice channel. The server only passes them on,
- * so conversations live in memory until the app closes or the user logs out.
+ * Private messages. Each conversation is a tab next to the text channel at the top of the chat area.
+ * The server only passes messages on, so conversations live in memory until the app closes or the user logs out.
  */
 export class DirectMessages {
   private panel = el('chat-panel')
   private log = el('chat-messages')
   private tabs = el('chat-tabs')
+  private channelTab = el('text-channel-tab') as HTMLButtonElement
   private input = el('chat-input') as HTMLTextAreaElement
   private send = el('chat-send') as HTMLButtonElement
   private error = el('chat-error')
   private jump = el('chat-jump') as HTMLButtonElement
   private bubbleHost = el('chat-bubbles')
   private conversations = new Map<string, Conversation>()
-  private participants: RoomParticipant[] = []
+  /** The open conversation. `null` shows the text channel. */
   private active: string | null = null
-  private inRoom = false
-  private visible = false
+  /** The chat area is on screen (not the voice stage). */
+  private chatVisible = false
   private connected = false
   private bubbles = false
   private sending = false
   private bubbleTimers = new Map<HTMLElement, number>()
 
   constructor(private hooks: DirectMessageHooks) {
-    for (const id of ['chat-toggle', 'chat-focus-toggle', 'chat-hide']) el(id).addEventListener('click', () => this.toggle())
+    this.channelTab.addEventListener('click', () => { if (this.active) { this.showChannel(); this.hooks.onShow(false) } })
+    this.channelTab.addEventListener('keydown', event => this.tabKeys(event, null))
     el('chat-form').addEventListener('submit', event => { event.preventDefault(); void this.submit() })
     this.input.addEventListener('input', () => {
       const conversation = this.current()
@@ -95,20 +98,20 @@ export class DirectMessages {
     this.jump.addEventListener('click', () => this.scrollToBottom())
     window.addEventListener('focus', () => { if (this.isReading() && this.atBottom()) this.markRead() })
     document.addEventListener('visibilitychange', () => { if (this.isReading() && this.atBottom()) this.markRead() })
-    document.addEventListener('keydown', event => {
-      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c' && this.inRoom && !document.querySelector('dialog[open]')) { event.preventDefault(); this.toggle() }
-    })
     new ResizeObserver(() => {
-      if (this.visible && this.current()?.atBottom) this.log.scrollTop = this.log.scrollHeight
+      if (this.isShown() && this.current()?.atBottom) this.log.scrollTop = this.log.scrollHeight
     }).observe(this.log)
+    this.sync()
   }
 
-  /** The panel is part of the voice view: it shows only while connected to a voice channel. */
-  setRoom(inRoom: boolean): void {
-    if (this.inRoom === inRoom) return
-    this.inRoom = inRoom
-    if (!inRoom) { this.visible = false; this.clearBubbles() }
-    this.sync()
+  /** Whether the chat area is on screen. The voice stage hides it. */
+  setChatVisible(visible: boolean): void {
+    if (this.chatVisible === visible) return
+    this.chatVisible = visible
+    if (this.isShown()) {
+      this.renderMessages()
+      if (this.current()?.atBottom) this.scrollToBottom()
+    }
   }
 
   setConnection(connected: boolean): void { this.connected = connected; this.syncComposer() }
@@ -118,35 +121,43 @@ export class DirectMessages {
     if (!bubbles) this.clearBubbles()
   }
 
-  setParticipants(participants: RoomParticipant[]): void {
-    this.participants = participants
-    for (const person of participants) {
-      const conversation = this.conversations.get(person.id)
-      if (conversation) conversation.name = person.name
-    }
-    this.renderTabs(); this.syncComposer()
+  /** Shows the text channel tab. Used when the user picks a text channel or a server. */
+  showChannel(): void {
+    if (!this.active) return
+    this.saveScroll()
+    this.active = null
+    this.error.hidden = true
+    this.sync()
   }
 
   /** Signing out forgets every conversation. */
   clear(): void {
+    const wasOpen = this.active !== null
     this.conversations.clear()
     this.active = null
-    this.visible = false
     this.sending = false
     this.input.value = ''
     this.error.hidden = true
-    this.log.replaceChildren(); this.tabs.replaceChildren(); delete this.tabs.dataset.signature
+    this.log.replaceChildren()
     this.clearBubbles(); this.sync(); this.hooks.onUnread()
+    if (wasOpen) this.hooks.onShow(false)
   }
 
   unreadFor(id: string): number { return this.conversations.get(id)?.unread ?? 0 }
 
-  whisper(id: string): void {
-    const person = this.participants.find(person => person.id === id && !person.local)
-    if (!person) return
-    if (!this.conversations.has(id)) this.conversations.set(id, this.conversation(id, person.name))
+  /** Opens the conversation with this person in the chat area. */
+  open(id: string): void {
+    if (id === this.hooks.self()) return
+    const name = this.hooks.nameOf(id)
+    if (!this.conversations.has(id)) {
+      if (!name) return
+      this.conversations.set(id, this.conversation(id, name))
+    }
     this.select(id)
-    this.visible = true; this.clearBubbles(); this.sync(); this.scrollToBottom(); this.input.focus()
+    this.hooks.onShow(true)
+    this.clearBubbles()
+    this.scrollToBottom()
+    this.input.focus()
   }
 
   receive(event: DirectMessage): void {
@@ -156,59 +167,49 @@ export class DirectMessages {
     if (id === self) return
     let conversation = this.conversations.get(id)
     if (!conversation) {
-      conversation = this.conversation(id, this.participants.find(person => person.id === id)?.name || message.senderName)
+      conversation = this.conversation(id, this.hooks.nameOf(id) || message.senderName)
       this.conversations.set(id, conversation)
     }
     if (conversation.messages.some(existing => existing.id === message.id)) return
     if (!message.local) conversation.name = message.senderName
-    const follows = id === this.active && conversation.atBottom
+    const follows = this.isShown() && id === this.active && conversation.atBottom
     conversation.messages.push(message)
     if (conversation.messages.length > MAX_HISTORY) conversation.messages.shift()
     if (!message.local && !(id === this.active && this.isReading() && follows)) conversation.unread++
-    if (!this.active) this.select(id)
-    else if (id === this.active && this.visible) this.appendMessage(message, conversation.messages.at(-2))
-    if (follows && this.visible) this.scrollToBottom(false)
-    this.renderTabs(); this.sync(); this.hooks.onUnread()
-    if (!message.local && !this.visible && this.bubbles && this.inRoom) this.showBubble(message, id)
+    if (id === this.active && this.isShown()) this.appendMessage(message, conversation.messages.at(-2))
+    if (follows) this.scrollToBottom(false)
+    this.sync(); this.hooks.onUnread()
+    if (!message.local && this.bubbles && !(id === this.active && this.isShown())) this.showBubble(message, id)
   }
 
   private current(): Conversation | undefined { return this.active ? this.conversations.get(this.active) : undefined }
   private conversation(id: string, name: string): Conversation { return { id, name, messages: [], unread: 0, draft: '', scrollTop: 0, atBottom: true } }
   private atBottom(): boolean { return this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 40 }
-  private isReading(): boolean { return this.inRoom && this.visible && document.visibilityState === 'visible' && document.hasFocus() }
+  private isShown(): boolean { return this.chatVisible && this.active !== null }
+  private isReading(): boolean { return this.isShown() && document.visibilityState === 'visible' && document.hasFocus() }
 
-  private toggle(): void {
-    if (!this.inRoom) return
-    this.visible = !this.visible
-    if (this.visible && !this.current()) {
-      const first = [...this.conversations.keys()][0]
-      if (first) this.select(first)
-    }
-    this.sync()
-    if (this.visible) {
-      this.clearBubbles(); this.renderMessages()
-      if (this.current()?.atBottom) this.scrollToBottom()
-      this.input.focus()
-    }
+  private saveScroll(): void {
+    const previous = this.current()
+    if (previous && this.isShown()) { previous.draft = this.input.value; previous.scrollTop = this.log.scrollTop }
   }
 
   private select(id: string): void {
     if (!this.conversations.has(id)) return
-    const previous = this.current()
-    if (previous) { previous.draft = this.input.value; previous.scrollTop = this.log.scrollTop }
+    this.saveScroll()
     this.active = id
     this.input.value = this.conversations.get(id)!.draft
     this.error.hidden = true
-    this.resizeInput(); this.renderTabs(); this.renderMessages(); this.syncComposer()
-    if (this.visible && this.conversations.get(id)!.atBottom) this.scrollToBottom()
+    this.resizeInput()
     this.sync()
+    this.renderMessages()
+    if (this.conversations.get(id)!.atBottom) this.scrollToBottom()
   }
 
   private markRead(): void {
     const conversation = this.current()
     if (!conversation?.unread) return
     conversation.unread = 0
-    this.renderTabs(); this.sync(); this.hooks.onUnread()
+    this.sync(); this.hooks.onUnread()
   }
 
   private scrollToBottom(mark = true): void {
@@ -220,29 +221,22 @@ export class DirectMessages {
   }
 
   private sync(): void {
-    const open = this.inRoom && this.visible
+    const open = this.active !== null
     this.panel.hidden = !open
-    const workspace = el('room-workspace')
-    workspace.classList.toggle('chat-open', open)
-    workspace.dataset.chatPosition = 'right'
-    const unread = [...this.conversations.values()].reduce((sum, conversation) => sum + conversation.unread, 0)
-    for (const id of ['chat-toggle', 'chat-focus-toggle']) {
-      const button = el(id) as HTMLButtonElement
-      button.hidden = !this.inRoom
-      labelButton(button, `${open ? 'Hide' : 'Show'} chat${unread ? `, ${unread} unread messages` : ''}`)
-      button.setAttribute('aria-expanded', String(open))
-      this.badge(button.querySelector('.chat-badge')!, unread)
-    }
+    document.body.classList.toggle('view-private', open)
+    this.channelTab.setAttribute('aria-selected', String(!open))
+    this.channelTab.tabIndex = open ? -1 : 0
+    this.renderTabs()
     this.syncComposer(); this.syncJump()
   }
 
   private syncComposer(): void {
     const conversation = this.current()
-    const peerGone = Boolean(conversation) && !this.hooks.reachable(conversation!.id)
+    const peerGone = Boolean(conversation) && !this.hooks.nameOf(conversation!.id)
     this.input.disabled = !conversation || !this.connected || peerGone || this.sending
     this.send.disabled = this.input.disabled || !this.input.value.trim()
-    this.input.placeholder = !conversation ? 'Click the message icon next to someone to whisper' : !this.connected ? 'Reconnecting…' : peerGone ? 'This person has left' : `Whisper to ${conversation.name}`
-    this.input.setAttribute('aria-label', this.input.placeholder)
+    this.input.placeholder = !conversation ? '' : !this.connected ? 'Reconnecting…' : peerGone ? 'You no longer share a server with this person' : `Message @${conversation.name}`
+    this.input.setAttribute('aria-label', this.input.placeholder || 'Message')
   }
 
   private syncJump(): void {
@@ -256,73 +250,71 @@ export class DirectMessages {
     element.textContent = count > 99 ? '+99' : String(count)
   }
 
+  private tabKeys(event: KeyboardEvent, id: string | null): void {
+    const ids: Array<string | null> = [null, ...this.conversations.keys()]
+    let index = ids.indexOf(id)
+    if (event.key === 'ArrowRight') index = (index + 1) % ids.length
+    else if (event.key === 'ArrowLeft') index = (index - 1 + ids.length) % ids.length
+    else if (event.key === 'Home') index = 0
+    else if (event.key === 'End') index = ids.length - 1
+    else return
+    event.preventDefault()
+    const next = ids[index]
+    if (next) this.open(next)
+    else this.channelTab.click()
+    const target = next ? this.tabs.querySelector<HTMLButtonElement>(`[data-tab-id="${CSS.escape(next)}"]`) : this.channelTab
+    target?.focus()
+  }
+
   private renderTabs(): void {
-    // Preserve focus and avoid rebuilding tabs on every roster change.
+    // Preserve focus and avoid rebuilding tabs when nothing changed.
     const signature = JSON.stringify([...this.conversations.values()].map(conversation => [conversation.id, conversation.name, conversation.unread, conversation.id === this.active]))
     if (this.tabs.dataset.signature === signature) return
     const focused = (document.activeElement as HTMLElement)?.dataset.tabId
     this.tabs.dataset.signature = signature
     this.tabs.replaceChildren()
     for (const conversation of this.conversations.values()) {
-      const item = document.createElement('div'); item.className = 'chat-tab-item'
-      item.classList.toggle('is-active', conversation.id === this.active)
-      const tab = document.createElement('button'); tab.type = 'button'; tab.className = 'chat-tab'
-      tab.dataset.tabId = conversation.id; tab.setAttribute('role', 'tab')
-      tab.id = `chat-tab-${conversation.id}`
-      tab.setAttribute('aria-controls', 'chat-messages'); tab.setAttribute('aria-selected', String(conversation.id === this.active))
-      tab.tabIndex = conversation.id === this.active ? 0 : -1
-      tab.title = `Whisper: ${conversation.name}`
+      const selected = conversation.id === this.active
+      const item = Object.assign(document.createElement('div'), { className: `text-tab-item${selected ? ' is-active' : ''}` })
+      const tab = Object.assign(document.createElement('button'), { type: 'button', className: 'text-tab' })
+      tab.dataset.tabId = conversation.id
+      tab.setAttribute('role', 'tab')
+      tab.setAttribute('aria-selected', String(selected))
+      tab.setAttribute('aria-controls', 'chat-panel')
+      tab.tabIndex = selected ? 0 : -1
+      tab.title = `Private messages with ${conversation.name}`
       tab.innerHTML = icon('private')
-      tab.append(Object.assign(document.createElement('span'), { className: 'chat-tab-name', textContent: conversation.name }))
+      tab.append(Object.assign(document.createElement('span'), { className: 'text-tab-name', textContent: conversation.name }))
       if (conversation.unread) { const badge = Object.assign(document.createElement('span'), { className: 'chat-badge' }); this.badge(badge, conversation.unread); tab.append(badge) }
-      tab.addEventListener('click', () => this.select(conversation.id))
-      tab.addEventListener('keydown', event => {
-        const ids = [...this.conversations.keys()]; let index = ids.indexOf(conversation.id)
-        if (event.key === 'ArrowRight') index = (index + 1) % ids.length
-        else if (event.key === 'ArrowLeft') index = (index - 1 + ids.length) % ids.length
-        else if (event.key === 'Home') index = 0
-        else if (event.key === 'End') index = ids.length - 1
-        else return
-        event.preventDefault(); this.select(ids[index]); this.tabs.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus()
-      })
-      const close = Object.assign(document.createElement('button'), { type: 'button', className: 'chat-tab-close' })
-      labelButton(close, `Close whisper with ${conversation.name}`); close.innerHTML = icon('close')
+      tab.addEventListener('click', () => this.open(conversation.id))
+      tab.addEventListener('keydown', event => this.tabKeys(event, conversation.id))
+      const close = Object.assign(document.createElement('button'), { type: 'button', className: 'text-tab-close' })
+      labelButton(close, `Close the conversation with ${conversation.name}`); close.innerHTML = icon('close')
       close.addEventListener('click', () => {
+        const wasActive = this.active === conversation.id
         this.conversations.delete(conversation.id)
-        if (this.active === conversation.id) {
-          this.active = null
-          const next = [...this.conversations.keys()][0]
-          if (next) this.select(next)
-          else { this.input.value = ''; this.renderMessages() }
-        }
-        this.renderTabs(); this.sync(); this.hooks.onUnread()
-        this.tabs.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus()
+        if (wasActive) { this.active = null; this.hooks.onShow(false) }
+        this.sync(); this.hooks.onUnread()
+        if (wasActive) this.channelTab.focus()
       })
       item.append(tab, close)
       this.tabs.append(item)
     }
-    if (focused) [...this.tabs.querySelectorAll<HTMLButtonElement>('[data-tab-id]')].find(tab => tab.dataset.tabId === focused)?.focus()
-    if (this.active) this.log.setAttribute('aria-labelledby', `chat-tab-${this.active}`)
-    else this.log.removeAttribute('aria-labelledby')
+    if (focused) this.tabs.querySelector<HTMLButtonElement>(`[data-tab-id="${CSS.escape(focused)}"]`)?.focus()
   }
 
   private renderMessages(): void {
     const conversation = this.current()
     this.log.replaceChildren()
-    if (!conversation || !conversation.messages.length) {
-      const empty = Object.assign(document.createElement('div'), { className: 'chat-empty' })
-      empty.innerHTML = icon('private')
-      empty.append(Object.assign(document.createElement('span'), { textContent: conversation ? conversation.name : 'No whispers yet' }))
-      this.log.append(empty)
-    }
     if (!conversation) { this.syncJump(); return }
+    const start = Object.assign(document.createElement('p'), { className: 'text-start', textContent: `This is the start of your private messages with ${conversation.name}. They are not saved: they go away when zodiak closes.` })
+    this.log.append(start)
     conversation.messages.forEach((message, index) => this.appendMessage(message, conversation.messages[index - 1]))
     this.log.scrollTop = conversation.atBottom ? this.log.scrollHeight : conversation.scrollTop
     this.syncJump()
   }
 
   private appendMessage(message: ChatMessage, previous?: ChatMessage): void {
-    this.log.querySelector('.chat-empty')?.remove()
     const newDay = !previous || new Date(previous.timestamp).toDateString() !== new Date(message.timestamp).toDateString()
     if (newDay) this.log.append(Object.assign(document.createElement('div'), { className: 'chat-day', textContent: day.format(message.timestamp) }))
     const grouped = !newDay && previous?.senderId === message.senderId && previous.senderName === message.senderName && message.timestamp >= previous.timestamp && message.timestamp - previous.timestamp < 300_000
@@ -332,9 +324,7 @@ export class DirectMessages {
       const avatar = this.hooks.avatar(message.senderName); avatar.classList.add('chat-avatar')
       const body = document.createElement('div'); body.className = 'chat-message-body'
       const head = document.createElement('header'); head.className = 'chat-message-head'
-      const name = Object.assign(document.createElement('button'), { type: 'button', className: 'chat-sender', textContent: message.senderName })
-      name.disabled = message.local; name.title = message.local ? 'You' : `Whisper to ${message.senderName}`
-      name.addEventListener('click', () => this.whisper(message.senderId))
+      const name = Object.assign(document.createElement('span'), { className: 'chat-sender', textContent: message.senderName })
       const timestamp = Object.assign(document.createElement('time'), { textContent: time.format(message.timestamp), dateTime: new Date(message.timestamp).toISOString(), title: new Date(message.timestamp).toLocaleString() })
       head.append(name, timestamp); body.append(head); group.append(avatar, body); this.log.append(group)
     }
@@ -350,7 +340,7 @@ export class DirectMessages {
     }
   }
 
-  private resizeInput(): void { this.input.style.height = 'auto'; this.input.style.height = `${Math.min(100, this.input.scrollHeight)}px` }
+  private resizeInput(): void { this.input.style.height = 'auto'; this.input.style.height = `${Math.min(200, this.input.scrollHeight)}px` }
 
   private async submit(): Promise<void> {
     const text = this.input.value.trim()
@@ -363,10 +353,11 @@ export class DirectMessages {
       conversation.draft = ''
       if (conversation.id === this.active) { this.input.value = ''; this.resizeInput() }
       this.receive(message)
+      if (conversation.id === this.active) this.scrollToBottom()
     } catch (error) {
       this.error.textContent = error instanceof Error ? error.message : 'Could not send. Try again.'; this.error.hidden = false
     } finally {
-      this.sending = false; this.syncComposer(); if (this.visible) this.input.focus()
+      this.sending = false; this.syncComposer(); if (this.isShown()) this.input.focus()
     }
   }
 
@@ -378,8 +369,8 @@ export class DirectMessages {
     const lock = document.createElement('span'); lock.innerHTML = icon('private'); heading.append(lock)
     copy.append(heading, Object.assign(document.createElement('span'), { textContent: message.text }))
     bubble.append(this.hooks.avatar(message.senderName), copy)
-    labelButton(bubble, `Open whisper from ${message.senderName}`)
-    bubble.addEventListener('click', () => { this.visible = true; this.select(id); this.clearBubbles(); this.sync(); this.scrollToBottom(); this.input.focus() })
+    labelButton(bubble, `Open private messages from ${message.senderName}`)
+    bubble.addEventListener('click', () => this.open(id))
     this.bubbleHost.append(bubble)
     this.bubbleTimers.set(bubble, window.setTimeout(() => this.removeBubble(bubble), 5_000))
   }

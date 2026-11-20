@@ -396,7 +396,8 @@ function registerIpc(): void {
 function registerPermissions(): void {
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
     // clipboard-sanitized-write lets the renderer copy text (invite codes); reading the clipboard stays denied.
-    callback(permission === 'media' || permission === 'display-capture' || permission === 'speaker-selection' || permission === 'clipboard-sanitized-write')
+    // Notifications tell the user about mentions while zodiak is in the background.
+    callback(permission === 'media' || permission === 'display-capture' || permission === 'speaker-selection' || permission === 'clipboard-sanitized-write' || permission === 'notifications')
   })
   registerCaptureHandler()
 }

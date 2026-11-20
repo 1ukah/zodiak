@@ -162,7 +162,8 @@ const chat = new DirectMessages({
   send: (recipientId, text, nonce) => api<DirectMessage>('POST', `/v1/users/${recipientId}/messages`, { content: text, nonce }),
   avatar: (name) => makeAvatar(name),
   self: () => zodiak?.user()?.id ?? null,
-  reachable: (id) => zodiak?.sharesServer(id) === true,
+  nameOf: (id) => zodiak?.displayName(id),
+  onShow: (conversation) => zodiak.showConversation(conversation),
   onUnread: () => renderMembers(),
 })
 
@@ -184,7 +185,6 @@ const hooks: SessionHooks = {
     })) return
     participants = ordered
     applySavedVoiceMutes(ordered)
-    if (!joiningSession) chat.setParticipants(ordered)
     renderMembers()
     renderChrome()
   },
@@ -231,6 +231,8 @@ async function boot(): Promise<void> {
     layoutChanged: () => renderChrome(),
     userChanged: (user) => syncAccount(user),
     settingsFailed: (message) => showNote(currentRoom ? stageNote : listNote, message, 'error'),
+    textChannelSelected: () => chat.showChannel(),
+    openConversation: (userId) => chat.open(userId),
   })
   window.zodiak.onEvent((event) => { if (event.t === 'DIRECT_MESSAGE_CREATE') chat.receive(event.d) })
   window.zodiak.onGatewayState((state) => chat.setConnection(state === 'ready'))
@@ -527,7 +529,6 @@ async function connect(channelId: string): Promise<boolean> {
   currentRoom = channelId
   hideLocalPreview = false
   applySavedStreamSettings()
-  chat.setParticipants(participants)
   clearNote(stageNote); renderRooms(); renderMembers(); renderChrome()
   zodiak.voiceChanged()
   return true
@@ -704,7 +705,7 @@ function renderChrome(): void {
   syncVoiceUI()
   if (joiningSession) return
   const inRoom = currentRoom !== null
-  chat.setRoom(inRoom)
+  chat.setChatVisible(zodiak?.isTextView() === true)
   const localStream = streams.find((stream) => stream.local)
   const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
   document.body.classList.toggle('in-room', inRoom)
@@ -1060,10 +1061,10 @@ function renderMembers(): void {
       actions.append(mute)
       const whisper = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-button member-whisper', innerHTML: icon('chat') })
       whisper.dataset.whisper = participant.id
-      labelButton(whisper, `Whisper to ${participant.name}`)
+      labelButton(whisper, `Message ${participant.name}`)
       const unread = chat.unreadFor(participant.id)
       if (unread) whisper.append(Object.assign(document.createElement('span'), { className: 'chat-badge', textContent: unread > 99 ? '+99' : String(unread) }))
-      whisper.addEventListener('click', (event) => { event.stopPropagation(); chat.whisper(participant.id) })
+      whisper.addEventListener('click', (event) => { event.stopPropagation(); chat.open(participant.id) })
       actions.append(whisper)
     }
     member.append(actions)

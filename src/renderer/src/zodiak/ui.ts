@@ -1,8 +1,9 @@
-import type { Channel, ChannelKind, CreateInviteRequest, GuildSnapshot, Invite, Id, PersonSettings, UpdatePersonSettingsRequest, User, UserSettings } from '../../../shared/protocol'
+import type { Channel, ChannelKind, CreateInviteRequest, GuildSnapshot, Invite, Id, Message, PersonSettings, UpdatePersonSettingsRequest, User, UserSettings } from '../../../shared/protocol'
 import type { GatewayState } from '../../../shared/zodiak'
 import { makeAvatar } from '../avatar'
 import { icon, labelButton } from '../icons'
 import { api, errorText } from './api'
+import { mentionsUser } from './mentions'
 import { ZodiakStore } from './store'
 import { TextChannelView } from './text-view'
 
@@ -18,6 +19,10 @@ export interface VoiceBridge {
   userChanged: (user: User | null) => void
   /** Saving an account setting failed. */
   settingsFailed: (message: string) => void
+  /** The user opened a text channel, so a private conversation that was open closes. */
+  textChannelSelected: () => void
+  /** Opens the private conversation with this person. */
+  openConversation: (userId: Id) => void
 }
 
 /** Slider moves are saved once the user stops moving it for this long. */
@@ -85,6 +90,8 @@ export class ZodiakUi {
   private readonly text: TextChannelView
   private channelDialogTarget: { guildId: Id; kind: ChannelKind; channel?: Channel } | null = null
   private confirmAction: (() => Promise<void>) | null = null
+  /** A private conversation is open in the chat area instead of the text channel. */
+  private conversationOpen = false
 
   private readonly rail = el('room-list', HTMLDivElement)
   private readonly channelList = el('channel-list', HTMLElement)
@@ -103,7 +110,10 @@ export class ZodiakUi {
       if (change.kind === 'all' || this.store.user) bridge.userChanged(this.store.user)
       bridge.layoutChanged()
     })
-    window.zodiak.onEvent((event) => this.store.apply(event))
+    window.zodiak.onEvent((event) => {
+      this.store.apply(event)
+      if (event.t === 'MESSAGE_CREATE') this.checkMention(event.d)
+    })
     window.zodiak.onGatewayState((state) => {
       this.gatewayState = state
       this.banner.hidden = !this.signedIn || state === 'ready'
@@ -120,7 +130,54 @@ export class ZodiakUi {
   }
 
   isTextView(): boolean {
-    return this.hasGuild() && this.view === 'text' && this.textChannelId !== null
+    return this.hasGuild() && this.view === 'text' && (this.textChannelId !== null || this.conversationOpen)
+  }
+
+  /** Shows the chat area, for a private conversation (`true`) or the text channel (`false`). */
+  showConversation(open: boolean): void {
+    this.conversationOpen = open
+    if (open) this.view = 'text'
+    this.text.open(this.isTextView() ? this.textChannelId : null)
+    this.clearSeenMentions()
+    this.render()
+    this.bridge.layoutChanged()
+  }
+
+  private closeConversation(): void {
+    if (!this.conversationOpen) return
+    this.conversationOpen = false
+    this.bridge.textChannelSelected()
+  }
+
+  /** The channel the user is reading now, if any. */
+  private readingChannel(): Id | null {
+    return this.isTextView() && !this.conversationOpen ? this.textChannelId : null
+  }
+
+  private clearSeenMentions(): void {
+    const channel = this.readingChannel()
+    if (channel) this.store.clearMentions(channel)
+  }
+
+  /** A message that mentions this user counts as unseen until the channel is open, and notifies while zodiak is in the background. */
+  private checkMention(message: Message): void {
+    const self = this.store.user
+    const members = this.store.guild(message.guild_id)?.members ?? []
+    if (!self || message.author.id === self.id || !mentionsUser(message.content, members, self.id)) return
+    const reading = this.readingChannel() === message.channel_id
+    if (!reading) this.store.addMention(message.channel_id)
+    if (reading && document.hasFocus()) return
+    try {
+      const channel = this.store.channel(message.channel_id)
+      const notification = new Notification(`${message.author.display_name} in #${channel?.name ?? ''}`, { body: message.content.slice(0, 200), silent: false })
+      notification.addEventListener('click', () => {
+        window.focus()
+        const target = this.store.channel(message.channel_id)
+        if (!target) return
+        this.selectGuild(target.guild_id)
+        void this.selectChannel(target)
+      })
+    } catch { /* Notifications are not available. */ }
   }
 
   channelName(id: Id | null): string | undefined {
@@ -140,9 +197,13 @@ export class ZodiakUi {
     return this.store.savedPeople()
   }
 
-  /** True when the user can send this person a private message. */
-  sharesServer(userId: Id): boolean {
-    return this.store.guilds.some((g) => g.members.some((m) => m.user.id === userId))
+  /** The display name of someone who shares a server with the user, so they can get private messages. */
+  displayName(userId: Id): string | undefined {
+    for (const g of this.store.guilds) {
+      const member = g.members.find((m) => m.user.id === userId)
+      if (member) return member.user.display_name
+    }
+    return undefined
   }
 
   /** Shows the change at once and saves it shortly after the last change. */
@@ -316,12 +377,14 @@ export class ZodiakUi {
     }
     if (this.view === 'voice' && !voice && !this.joiningVoice) this.view = 'text'
     this.text.open(this.isTextView() ? this.textChannelId : null)
+    this.clearSeenMentions()
   }
 
   private selectGuild(guildId: Id): void {
     if (this.guildId === guildId) return
     this.guildId = guildId
     this.textChannelId = null
+    this.closeConversation()
     const voice = this.store.channel(this.bridge.currentVoiceChannel())
     this.view = voice?.guild_id === guildId ? 'voice' : 'text'
     this.reconcileSelection()
@@ -334,7 +397,9 @@ export class ZodiakUi {
     if (channel.kind === 'text') {
       this.textChannelId = channel.id
       this.view = 'text'
+      this.closeConversation()
       this.saveSelection()
+      this.clearSeenMentions()
     } else if (this.bridge.currentVoiceChannel() === channel.id) {
       this.view = 'voice'
     } else {
@@ -393,6 +458,12 @@ export class ZodiakUi {
         avatar.setAttribute('aria-label', online ? 'Online' : 'Offline')
         row.append(avatar, Object.assign(document.createElement('span'), { className: 'member-row-name', textContent: name }))
         if (member.user.id === snapshot.guild.owner_id) row.append(Object.assign(document.createElement('span'), { className: 'member-owner', textContent: 'Owner' }))
+        if (member.user.id !== this.store.user?.id) {
+          const message = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-button member-row-message', innerHTML: icon('chat') })
+          labelButton(message, `Message ${name}`)
+          message.addEventListener('click', () => this.bridge.openConversation(member.user.id))
+          row.append(message)
+        }
         list.append(row)
       }
     }
@@ -410,6 +481,11 @@ export class ZodiakUi {
       button.setAttribute('aria-pressed', String(active))
       labelButton(button, guild.name)
       if (guild.id === voiceGuild) button.append(Object.assign(document.createElement('i'), { className: 'live-dot', ariaLabel: 'Connected to voice' }))
+      const mentions = this.store.guildMentionCount(guild.id)
+      if (mentions) {
+        button.append(Object.assign(document.createElement('span'), { className: 'chat-badge mention-badge', textContent: mentions > 99 ? '+99' : String(mentions) }))
+        labelButton(button, `${guild.name}, ${mentions} mention${mentions === 1 ? '' : 's'}`)
+      }
       button.addEventListener('click', () => this.selectGuild(guild.id))
       row.append(button)
       this.rail.append(row)
@@ -496,7 +572,9 @@ export class ZodiakUi {
     button.setAttribute('aria-current', String(selected))
     button.innerHTML = icon(channel.kind === 'text' ? 'hash' : 'volume')
     button.append(Object.assign(document.createElement('span'), { className: 'channel-name', textContent: channel.name }))
-    button.title = channel.kind === 'voice' && !connected ? `Join ${channel.name}` : channel.name
+    const mentions = this.store.mentionCount(channel.id)
+    if (mentions) button.append(Object.assign(document.createElement('span'), { className: 'chat-badge mention-badge', textContent: mentions > 99 ? '+99' : String(mentions) }))
+    button.title = channel.kind === 'voice' && !connected ? `Join ${channel.name}` : mentions ? `${channel.name}, ${mentions} mention${mentions === 1 ? '' : 's'}` : channel.name
     button.addEventListener('click', () => void this.selectChannel(channel))
     row.append(button)
     if (owner) {

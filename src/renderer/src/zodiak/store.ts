@@ -31,6 +31,8 @@ export class ZodiakStore {
   online = new Set<Id>()
   /** Account settings saved on the server. Local changes show at once; ZodiakUi saves them. */
   membersHidden = false
+  /** Messages that mention this user and were not seen yet, by channel. */
+  private mentions = new Map<Id, number>()
   private people = new Map<Id, PersonSettings>()
   private histories = new Map<Id, ChannelHistory>()
   private listeners = new Set<(change: StoreChange) => void>()
@@ -51,8 +53,28 @@ export class ZodiakStore {
     this.online.clear()
     this.membersHidden = false
     this.people.clear()
+    this.mentions.clear()
     this.histories.clear()
     this.emit({ kind: 'all' })
+  }
+
+  mentionCount(channelId: Id): number {
+    return this.mentions.get(channelId) ?? 0
+  }
+
+  /** Unseen mentions in all channels of the server. */
+  guildMentionCount(guildId: Id): number {
+    return this.guild(guildId)?.channels.reduce((sum, channel) => sum + this.mentionCount(channel.id), 0) ?? 0
+  }
+
+  addMention(channelId: Id): void {
+    this.mentions.set(channelId, this.mentionCount(channelId) + 1)
+    this.emit({ kind: 'guilds' })
+  }
+
+  clearMentions(channelId: Id): void {
+    if (!this.mentions.delete(channelId)) return
+    this.emit({ kind: 'guilds' })
   }
 
   /** How this user hears another person. People without saved settings get the defaults. */
