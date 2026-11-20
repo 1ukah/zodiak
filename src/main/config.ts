@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { AppConfig, UpdateChannel } from '../shared/types'
+import type { AppConfig, Keybinds, UpdateChannel } from '../shared/types'
 import { isRecord } from './parse'
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -11,6 +11,7 @@ const DEFAULT_CONFIG: AppConfig = {
   checkForUpdatesOnStartup: true,
   updateChannel: 'stable',
   hardwareAcceleration: true,
+  showChatBubbles: false,
   voiceEnabled: true,
   voiceInputDeviceId: 'default',
   voiceInputVolume: 1,
@@ -21,6 +22,18 @@ const DEFAULT_CONFIG: AppConfig = {
   voiceNoiseGate: true,
   voiceAutoInputSensitivity: true,
   voiceInputSensitivity: -50,
+  keybinds: { mute: '', deafen: '' },
+}
+
+const ACCELERATOR = /^[A-Za-z0-9+\-=[\]\\;',./`]{1,64}$/
+
+function keybind(value: unknown): string {
+  return typeof value === 'string' && ACCELERATOR.test(value) ? value : ''
+}
+
+function keybinds(value: unknown): Keybinds {
+  const record = isRecord(value) ? value : {}
+  return { mute: keybind(record.mute), deafen: keybind(record.deafen) }
 }
 
 function configPath(): string {
@@ -75,6 +88,7 @@ export function validateConfig(value: unknown): AppConfig {
     // updateChannel: requireUpdateChannel(value.updateChannel),
     updateChannel: 'stable',
     hardwareAcceleration: value.hardwareAcceleration !== false,
+    showChatBubbles: value.showChatBubbles === true,
     voiceEnabled: value.voiceEnabled !== false,
     voiceInputDeviceId: stringOr(value.voiceInputDeviceId, 'default').slice(0, 512) || 'default',
     voiceInputVolume: inputVolume(value.voiceInputVolume),
@@ -85,6 +99,7 @@ export function validateConfig(value: unknown): AppConfig {
     voiceNoiseGate: value.voiceNoiseGate !== false,
     voiceAutoInputSensitivity: value.voiceAutoInputSensitivity !== false,
     voiceInputSensitivity: inputSensitivity(value.voiceInputSensitivity),
+    keybinds: keybinds(value.keybinds),
   }
 }
 
@@ -98,6 +113,7 @@ function normalizeStored(value: unknown): AppConfig {
     // updateChannel: record.updateChannel === 'beta' ? 'beta' : 'stable',
     updateChannel: 'stable',
     hardwareAcceleration: record.hardwareAcceleration !== false,
+    showChatBubbles: record.showChatBubbles === true,
     voiceEnabled: record.voiceEnabled !== false,
     voiceInputDeviceId: stringOr(record.voiceInputDeviceId, 'default').slice(0, 512) || 'default',
     voiceInputVolume: inputVolume(record.voiceInputVolume),
@@ -108,6 +124,7 @@ function normalizeStored(value: unknown): AppConfig {
     voiceNoiseGate: record.voiceNoiseGate !== false,
     voiceAutoInputSensitivity: record.voiceAutoInputSensitivity !== false,
     voiceInputSensitivity: inputSensitivity(record.voiceInputSensitivity),
+    keybinds: keybinds(record.keybinds),
   }
 }
 

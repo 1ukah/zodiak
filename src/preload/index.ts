@@ -59,6 +59,21 @@ const api = {
     return () => ipcRenderer.removeListener(channels.restartRequired, wrapped)
   },
   relaunchApp: () => ipcRenderer.invoke(channels.relaunchApp),
+  onKeybind: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, action: unknown): void => {
+      if (action === 'mute' || action === 'deafen') listener(action)
+    }
+    ipcRenderer.on(channels.keybindPressed, wrapped)
+    return () => ipcRenderer.removeListener(channels.keybindPressed, wrapped)
+  },
+  onKeybindsFailed: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, actions: unknown): void => {
+      if (Array.isArray(actions)) listener(actions.filter((action) => action === 'mute' || action === 'deafen'))
+    }
+    ipcRenderer.on(channels.keybindsFailed, wrapped)
+    return () => ipcRenderer.removeListener(channels.keybindsFailed, wrapped)
+  },
+  pauseKeybinds: (paused) => ipcRenderer.send(channels.pauseKeybinds, paused),
 } satisfies SharescreenApi
 
 contextBridge.exposeInMainWorld('sharescreen', api)

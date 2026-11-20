@@ -10,6 +10,7 @@ import { removeLegacyData } from './legacy-data'
 import { isRecord } from './parse'
 import { settle } from './result'
 import { registerZodiakIpc, stopZodiak } from './zodiak'
+import { applyKeybinds, clearKeybinds, pauseKeybinds } from './keybinds'
 
 // Electron enables Chromium's GPU pipeline by default. Users can turn it off in
 // Settings > System (applied below, after userData is resolved); the renderer
@@ -333,8 +334,13 @@ function registerIpc(): void {
     if (saved.hardwareAcceleration !== hardwareAcceleration && saved.hardwareAcceleration !== previous.hardwareAcceleration) {
       if (!event.sender.isDestroyed()) event.sender.send(channels.restartRequired, saved.hardwareAcceleration)
     }
+    const failedKeybinds = applyKeybinds(saved.keybinds)
+    if (failedKeybinds.length && !event.sender.isDestroyed()) event.sender.send(channels.keybindsFailed, failedKeybinds)
     return saved
   }))
+  ipcMain.on(channels.pauseKeybinds, (_event, paused: unknown) => {
+    if (typeof paused === 'boolean') pauseKeybinds(paused)
+  })
   ipcMain.handle(channels.relaunchApp, () => { app.relaunch(); app.quit() })
   ipcMain.handle(channels.checkForUpdates, (_event, channel: unknown) => settle(async () => {
     await (await loadUpdater()).requestUpdateCheck(true, channel)
@@ -419,13 +425,17 @@ function createTray(): void {
   tray.on('click', showMainWindow)
 }
 // Windows can leave a stale notification-area icon unless it is removed explicitly.
-app.on('will-quit', () => { tray?.destroy(); tray = null })
+app.on('will-quit', () => { tray?.destroy(); tray = null; clearKeybinds() })
 
 if (primaryInstance) app.whenReady().then(() => {
   void removeLegacyData()
   registerPermissions()
   registerIpc()
   registerZodiakIpc()
+  void loadConfig().then((config) => {
+    const failed = applyKeybinds(config.keybinds)
+    if (failed.length) console.warn('Could not register keybinds:', failed.join(', '))
+  })
   createTray()
   const splash = createSplash()
   // Let the small splash paint before loading the main renderer and its modules.

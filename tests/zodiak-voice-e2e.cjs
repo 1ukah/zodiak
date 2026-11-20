@@ -154,6 +154,10 @@ async function host(win) {
   if (codec && codec.toLowerCase() !== 'video/h264') throw Error(`The screen uses ${codec}, not H.264`)
 
   await waitFile(path.join(shared, 'guest-watching.json'), 60_000)
+  await until('the unread private message', `document.querySelector('#members-list .member-whisper .chat-badge')?.textContent === '1'`, 10_000)
+  await click('#members-list .member-whisper')
+  await until('the private message', `[...document.querySelectorAll('#chat-messages .chat-message-text')].some(m => m.textContent === 'psst, only you')`, 5_000)
+  log('PASS received the private message, with an unread badge on the guest row')
   await http('PATCH', '/v1/users/@me', owner.token, { display_name: 'Host Renamed' })
   await waitFile(path.join(shared, 'guest-saw-rename.json'), 20_000)
   await http('DELETE', `/v1/guilds/${guild.guild.id}/members/${guest.user.id}`, owner.token)
@@ -166,6 +170,11 @@ async function host(win) {
   await click('#leave')
   await until('leaving voice', `!document.body.classList.contains('in-room')`)
   log('PASS left voice')
+  await until('the remembered microphone state', `document.querySelector('#voice-mute').getAttribute('aria-pressed') === 'false' && !document.querySelector('#voice-mute').disabled
+    && JSON.parse(localStorage.getItem('zodiak.voiceInput')).muted === false`, 5_000)
+  await click('#voice-deafen')
+  await until('deafen outside a call', `document.querySelector('#voice-deafen').getAttribute('aria-pressed') === 'true' && JSON.parse(localStorage.getItem('zodiak.voiceInput')).deafened === true`, 5_000)
+  log('PASS keeps the microphone and headphone state outside a call')
 }
 
 async function guest(win) {
@@ -205,6 +214,12 @@ async function guest(win) {
       return Boolean(host) && Math.abs(host.voice_volume - 0.6) < 0.001 && Math.abs(host.stream_volume - 1.4) < 0.001
     })`, 5_000)
     log('PASS voice and screen-share volumes for the host are saved on the server')
+
+    await js(`document.querySelector('#members-list .member-whisper').click()`)
+    await until('the private message panel', `!document.querySelector('#chat-panel').hidden && !document.querySelector('#chat-input').disabled`, 5_000)
+    await js(`(() => { const input = document.querySelector('#chat-input'); input.value = 'psst, only you'; input.dispatchEvent(new Event('input')); document.querySelector('#chat-form').requestSubmit() })()`)
+    await until('the sent private message', `[...document.querySelectorAll('#chat-messages .chat-message-text')].some(m => m.textContent === 'psst, only you')`, 5_000)
+    log('PASS sent a private message to the host')
     await new Promise((resolve) => setTimeout(resolve, 800))
     await shot('zodiak-05-voice-guest.png')
     await fs.writeFile(path.join(shared, 'guest-watching.json'), '{}')

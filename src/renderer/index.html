@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:* blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: https:; font-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:* blob: data:; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'none'; form-action 'none'" />
   <title>zodiak</title><link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
@@ -65,6 +65,7 @@
           <button id="theater" class="icon-button" type="button" title="Focus view" aria-label="Focus view" hidden><span data-icon="focus"></span></button>
           <button id="pop-out" class="icon-button" type="button" title="Pop out" aria-label="Pop out" hidden><span data-icon="popout"></span></button>
           <button id="fullscreen" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button>
+          <button id="chat-toggle" class="icon-button chat-toggle" type="button" title="Show chat" aria-label="Show chat" aria-controls="chat-panel" aria-expanded="false" hidden><span data-icon="chat"></span><span class="chat-badge" hidden></span></button>
         </div>
       </header>
       <div id="stage" class="is-idle">
@@ -74,7 +75,7 @@
         <p id="stage-note" class="note" role="alert" data-dismissible hidden></p><aside id="stream-metrics" aria-label="Stream statistics" hidden><section id="host-metrics" class="metric-card" hidden><header><strong>Host</strong><span>Sending</span></header><dl></dl></section><section id="viewer-metrics" class="metric-card" hidden><header><strong>Viewer</strong><span>Receiving</span></header><dl></dl></section></aside>
       </div>
       <button id="exit-focus" class="icon-button" title="Exit focus (Esc)" aria-label="Exit focus" hidden><span data-icon="focus"></span></button>
-      <div id="focus-view-controls" aria-label="Stream controls"><button id="fullscreen-focus" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button></div>
+      <div id="focus-view-controls" aria-label="Stream controls"><button id="fullscreen-focus" class="icon-button" type="button" title="Fullscreen" aria-label="Fullscreen" hidden><span data-icon="expand"></span></button><button id="chat-focus-toggle" class="icon-button chat-toggle" type="button" title="Show chat" aria-label="Show chat" aria-controls="chat-panel" hidden><span data-icon="chat"></span><span class="chat-badge" hidden></span></button></div>
       <footer id="call-controls" hidden>
         <div class="call-actions">
           <button id="voice-focus-mute" class="control-button voice-control voice-focus-control" type="button" title="Unmute microphone" aria-label="Unmute microphone" aria-pressed="true"><span data-icon="mic-off"></span></button>
@@ -87,8 +88,14 @@
         </div>
       </footer>
     </main>
+    <aside id="chat-panel" aria-label="Private messages" hidden>
+      <header class="chat-header"><div id="chat-tabs" role="tablist" aria-label="Conversations"></div><button id="chat-hide" class="icon-button" type="button" title="Hide chat" aria-label="Hide chat"><span data-icon="close"></span></button></header>
+      <div class="chat-history"><div id="chat-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages" tabindex="0"></div><button id="chat-jump" class="control-button" type="button" title="Jump to new messages" aria-label="Jump to new messages" hidden><span data-icon="down"></span><span class="chat-badge" hidden></span></button></div>
+      <form id="chat-form"><p id="chat-error" class="note" role="alert" hidden></p><div class="chat-composer"><textarea id="chat-input" rows="1" maxlength="2000" aria-label="Message" placeholder="Message" title="Enter to send · Shift+Enter for a new line"></textarea><button id="chat-send" class="icon-button" type="submit" title="Send message" aria-label="Send message"><span data-icon="send"></span></button></div></form>
+    </aside>
     </div>
   </div>
+  <div id="chat-bubbles" aria-label="Chat previews"></div>
   <dialog id="guild-dialog" class="dialog small-dialog" aria-labelledby="guild-dialog-title">
     <div class="dialog-content">
       <div class="panel-head"><h2 id="guild-dialog-title">Add a server</h2><button class="icon-button" type="button" data-close="guild-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
@@ -117,7 +124,6 @@
     <form id="channel-form" class="dialog-content">
       <div class="panel-head"><h2 id="channel-dialog-title">Create channel</h2><button class="icon-button" type="button" data-close="channel-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
       <label class="field" for="channel-name">Name<input id="channel-name" type="text" maxlength="100" autocomplete="off" required /></label>
-      <label class="field" id="channel-kind-field" for="channel-kind">Type<select id="channel-kind"><option value="text">Text</option><option value="voice">Voice</option></select></label>
       <p id="channel-note" class="note" role="alert" hidden></p>
       <div class="actions"><button id="channel-delete" class="danger" type="button" hidden>Delete channel</button><button id="channel-save" class="primary" type="submit">Create</button></div>
     </form>
@@ -127,7 +133,7 @@
       <div class="panel-head"><h2 id="guild-settings-title">Server settings</h2><button class="icon-button" type="button" data-close="guild-settings-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
       <div id="guild-owner-settings">
         <label class="field" for="guild-rename">Server name<input id="guild-rename" type="text" maxlength="100" autocomplete="off" required /></label>
-        <div class="actions"><button id="guild-add-channel" class="ghost" type="button">Create channel</button><button class="primary" type="submit">Save</button></div>
+        <div class="actions"><button class="primary" type="submit">Save</button></div>
       </div>
       <p id="guild-settings-note" class="note" role="alert" hidden></p>
       <div class="actions"><button id="guild-delete" class="danger" type="button">Delete server</button><button id="guild-leave" class="danger" type="button">Leave server</button></div>
@@ -140,7 +146,8 @@
           <button id="settings-tab-account" role="tab" aria-selected="true" aria-controls="settings-panel-account" tabindex="0" data-settings-tab="account"><span data-icon="account"></span>Account</button>
           <button id="settings-tab-audio" role="tab" aria-selected="false" aria-controls="settings-panel-audio" tabindex="-1" data-settings-tab="audio"><span data-icon="headphones"></span>Audio</button>
           <button id="settings-tab-interface" role="tab" aria-selected="false" aria-controls="settings-panel-interface" tabindex="-1" data-settings-tab="interface"><span data-icon="monitor"></span>Interface</button>
-          <button id="settings-tab-system" role="tab" aria-selected="false" aria-controls="settings-panel-system" tabindex="-1" data-settings-tab="system"><span data-icon="keyboard"></span>System</button>
+          <button id="settings-tab-keybinds" role="tab" aria-selected="false" aria-controls="settings-panel-keybinds" tabindex="-1" data-settings-tab="keybinds"><span data-icon="keyboard"></span>Keybinds</button>
+          <button id="settings-tab-system" role="tab" aria-selected="false" aria-controls="settings-panel-system" tabindex="-1" data-settings-tab="system"><span data-icon="system"></span>System</button>
         </div>
       </nav>
       <div class="settings-main">
@@ -176,6 +183,13 @@
           </section>
           <section id="settings-panel-interface" role="tabpanel" aria-labelledby="settings-tab-interface" tabindex="0" hidden>
             <label class="check" for="show-stream-statistics"><span>Stream statistics</span><input id="show-stream-statistics" type="checkbox" role="switch" title="Show host and viewer stream statistics" /></label>
+            <label class="check" for="show-chat-bubbles"><span>Show chat bubbles</span><input id="show-chat-bubbles" type="checkbox" role="switch" title="Preview private messages while chat is hidden" /></label>
+          </section>
+          <section id="settings-panel-keybinds" role="tabpanel" aria-labelledby="settings-tab-keybinds" tabindex="0" hidden>
+            <p class="quality-note">Keybinds work while zodiak is in the background. Click a keybind, then press the keys. Esc cancels.</p>
+            <div class="keybind-row"><span id="keybind-mute-label">Toggle mute</span><button id="keybind-mute" class="keybind-button" type="button" data-keybind="mute" aria-describedby="keybind-mute-label">Not set</button><button class="icon-button keybind-clear" type="button" data-keybind-clear="mute" title="Remove the mute keybind" aria-label="Remove the mute keybind"><span data-icon="close"></span></button></div>
+            <div class="keybind-row"><span id="keybind-deafen-label">Toggle deafen</span><button id="keybind-deafen" class="keybind-button" type="button" data-keybind="deafen" aria-describedby="keybind-deafen-label">Not set</button><button class="icon-button keybind-clear" type="button" data-keybind-clear="deafen" title="Remove the deafen keybind" aria-label="Remove the deafen keybind"><span data-icon="close"></span></button></div>
+            <p id="keybind-note" class="quality-note" role="status" hidden></p>
           </section>
           <section id="settings-panel-system" role="tabpanel" aria-labelledby="settings-tab-system" tabindex="0" hidden>
             <!-- Beta is paused; every build follows Stable. Restore with the #update-channel code in main.ts.

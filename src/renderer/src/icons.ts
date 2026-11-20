@@ -3,7 +3,7 @@ import {
   Clock, Download, LoaderCircle, LogOut, Maximize, Minimize, Monitor, MonitorUp, PanelLeftClose,
   PictureInPicture2, Plus, RotateCw, Search, Server, Settings, Square, Users,
   Volume2, VolumeX, X, MessageCircle, Send, UserRound, Keyboard, Hash, LockKeyhole, ArrowDown, ExternalLink, Play, createElement, type IconNode,
-  Copy, Pencil, Trash2, UserPlus,
+  Copy, Pencil, Trash2, UserPlus, Cpu,
 } from 'lucide'
 
 const icons: Record<string, IconNode> = {
@@ -20,7 +20,7 @@ const icons: Record<string, IconNode> = {
   download: Download, later: Clock,
   attach: Plus,
   previous: ChevronLeft, next: ChevronRight,
-  copy: Copy, edit: Pencil, trash: Trash2, invite: UserPlus,
+  copy: Copy, edit: Pencil, trash: Trash2, invite: UserPlus, system: Cpu,
 }
 
 const markup = new Map<string, string>()

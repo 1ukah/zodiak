@@ -1,5 +1,8 @@
-import { PORTAL_SOURCE_ID, shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type PlatformCapabilities, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
-import type { User } from '../../shared/protocol'
+import { KEYBIND_ACTIONS, PORTAL_SOURCE_ID, shareBitrateRangeFor, supportsShareQuality, type AppConfig, type CaptureAccelerationStatus, type DesktopSourceInfo, type KeybindAction, type Keybinds, type PlatformCapabilities, type ShareBitrateMode, type ShareFrameRate, type SharePriority, type ShareQuality, type ShareResolution } from '../../shared/types'
+import type { DirectMessage, User } from '../../shared/protocol'
+import { DirectMessages } from './direct-messages'
+import { acceleratorFromKey, formatAccelerator } from './keybinds'
+import { api } from './zodiak/api'
 import { ZodiakUi } from './zodiak/ui'
 import { hideStream, joinRoom, leaveRoom, publishScreen, resumeRemoteAudio, selectStream, setGridVideos, setRemoteAudioOutputDevice, setRemoteAudioVolume, setStageVideoVisible, setStreamMuted, setStreamVolume, setTelemetryEnabled, supportsRemoteAudioOutputSelection, unpublishScreen, updateDisplayName, watchStream, type Presence, type RoomParticipant, type ScreenStream, type SessionHooks, type StreamMetric, type StreamTelemetry } from './session-loader'
 import { avatarHue, initials, makeAvatar } from './avatar'
@@ -145,7 +148,23 @@ let streamOrder: string[] = loadStreamOrder()
 let draggedTileId: string | null = null
 /** People in voice whose saved "mute for you" was already applied in this call. */
 const voiceMuteApplied = new Set<string>()
+const VOICE_INPUT_KEY = 'zodiak.voiceInput'
+/** The microphone and headphone state the user chose last. It is kept between calls and app starts. */
+let voicePreference = loadVoicePreference()
+const showChatBubblesInput = byId('show-chat-bubbles', HTMLInputElement)
+const keybindNote = byId('keybind-note', HTMLParagraphElement)
+/** Keybinds shown in settings; saved with the other settings. */
+let keybindDraft: Keybinds = { mute: '', deafen: '' }
+let recordingKeybind: KeybindAction | null = null
+let keybindStopped: { action: KeybindAction; at: number } | null = null
 let zodiak: ZodiakUi
+const chat = new DirectMessages({
+  send: (recipientId, text, nonce) => api<DirectMessage>('POST', `/v1/users/${recipientId}/messages`, { content: text, nonce }),
+  avatar: (name) => makeAvatar(name),
+  self: () => zodiak?.user()?.id ?? null,
+  reachable: (id) => zodiak?.sharesServer(id) === true,
+  onUnread: () => renderMembers(),
+})
 
 const hooks: SessionHooks = {
   onVoice: (state) => { voiceState = state; syncVoiceUI(); if (!loopbackRequested && settingsDialog.open) showInputLevel(state.inputLevel) },
@@ -165,6 +184,7 @@ const hooks: SessionHooks = {
     })) return
     participants = ordered
     applySavedVoiceMutes(ordered)
+    if (!joiningSession) chat.setParticipants(ordered)
     renderMembers()
     renderChrome()
   },
@@ -212,6 +232,8 @@ async function boot(): Promise<void> {
     userChanged: (user) => syncAccount(user),
     settingsFailed: (message) => showNote(currentRoom ? stageNote : listNote, message, 'error'),
   })
+  window.zodiak.onEvent((event) => { if (event.t === 'DIRECT_MESSAGE_CREATE') chat.receive(event.d) })
+  window.zodiak.onGatewayState((state) => chat.setConnection(state === 'ready'))
   const [config, platformCapabilities] = await Promise.all([window.sharescreen.getConfig(), window.sharescreen.getPlatformCapabilities()])
   capabilities = platformCapabilities
   fillForm(config)
@@ -226,6 +248,7 @@ async function boot(): Promise<void> {
 
 /** The account display name is also the voice name. */
 function syncAccount(user: User | null): void {
+  if (!user) chat.clear()
   if (!user || !savedConfig) return
   nameInput.value = user.display_name
   elementById('profile-name').textContent = user.display_name
@@ -280,7 +303,7 @@ function bind(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-settings]').forEach((button) => button.addEventListener('click', () => openSettings()))
   elementById('lobby-settings').addEventListener('click', openSettings)
   document.querySelectorAll<HTMLButtonElement>('[data-close]').forEach((button) => button.addEventListener('click', () => byId(button.dataset.close!, HTMLDialogElement).close()))
-  settingsDialog.addEventListener('close', () => { setVoiceInputLevelReporting(false); stopMicrophoneTest(); if (savedConfig) { fillForm(savedConfig); void previewVoiceSettings() } })
+  settingsDialog.addEventListener('close', () => { stopKeybindRecording(); setVoiceInputLevelReporting(false); stopMicrophoneTest(); if (savedConfig) { fillForm(savedConfig); void previewVoiceSettings() } })
   window.addEventListener('pagehide', stopMicrophoneTest)
   byId('save-settings', HTMLButtonElement).addEventListener('click', async () => {
     const button = byId('save-settings', HTMLButtonElement)
@@ -382,8 +405,37 @@ function bind(): void {
     control.addEventListener('change', () => { syncVoiceSettings(); void updateMicrophoneTest(); void previewVoiceSettings() })
   }
   sensitivityInput.addEventListener('input', () => { syncSensitivity(); void updateMicrophoneTest(); void previewVoiceSettings() })
-  for (const id of ['voice-mute', 'voice-focus-mute']) elementById(id).addEventListener('click', () => void changeVoice(() => setVoiceMuted(!voiceState.muted)))
-  for (const id of ['voice-deafen', 'voice-focus-deafen']) elementById(id).addEventListener('click', () => void changeVoice(() => setVoiceDeafened(!voiceState.deafened)))
+  for (const id of ['voice-mute', 'voice-focus-mute']) elementById(id).addEventListener('click', toggleMute)
+  for (const id of ['voice-deafen', 'voice-focus-deafen']) elementById(id).addEventListener('click', toggleDeafen)
+  window.sharescreen.onKeybind((action) => {
+    if (recordingKeybind) return
+    if (action === 'mute') toggleMute()
+    else toggleDeafen()
+  })
+  window.sharescreen.onKeybindsFailed((actions) => {
+    const names = actions.map((action) => action === 'mute' ? 'mute' : 'deafen').join(' and ')
+    const message = `The ${names} keybind is used by another app. Choose another one.`
+    if (settingsDialog.open) { selectSettingsTab('keybinds'); showKeybindNote(message, 'error') }
+    else showNote(currentRoom ? stageNote : listNote, message, 'warn')
+  })
+  for (const button of settingsDialog.querySelectorAll<HTMLButtonElement>('[data-keybind]')) {
+    button.addEventListener('click', (event) => {
+      // Space or Enter in a recorded keybind must not start a new recording on key up.
+      const action = button.dataset.keybind as KeybindAction
+      if (event.detail === 0 && keybindStopped?.action === action && performance.now() - keybindStopped.at < 500) return
+      startKeybindRecording(action)
+    })
+    button.addEventListener('keydown', recordKeybind)
+    button.addEventListener('blur', () => stopKeybindRecording())
+  }
+  for (const button of settingsDialog.querySelectorAll<HTMLButtonElement>('[data-keybind-clear]')) {
+    button.addEventListener('click', () => {
+      stopKeybindRecording()
+      keybindDraft = { ...keybindDraft, [button.dataset.keybindClear as KeybindAction]: '' }
+      renderKeybinds()
+    })
+  }
+  showChatBubblesInput.addEventListener('change', () => chat.configure(showChatBubblesInput.checked))
   navigator.mediaDevices?.addEventListener?.('devicechange', () => { void loadAudioOutputs(); void loadVoiceInputs() })
   pickerForm.addEventListener('submit', (event) => { event.preventDefault(); void onGoLive() })
   cancelShareButton.addEventListener('click', closePicker)
@@ -421,7 +473,7 @@ function bind(): void {
       exitFocusView()
     }
   })
-  window.addEventListener('beforeunload', () => { void window.sharescreen.setSharing(false); void leaveRoom() })
+  window.addEventListener('beforeunload', () => { void zodiak.flushSettings(); void window.sharescreen.setSharing(false); void leaveRoom() })
   window.addEventListener('resize', syncRailOverflow)
 }
 
@@ -461,7 +513,7 @@ async function connect(channelId: string): Promise<boolean> {
     await joinRoom({
       channelId,
       name: saved.displayName,
-      voice: { enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength, echoCancellation: saved.voiceEchoCancellation, autoGainControl: saved.voiceAutoGainControl, noiseGate: saved.voiceNoiseGate, autoInputSensitivity: saved.voiceAutoInputSensitivity, inputSensitivity: saved.voiceInputSensitivity, participantVolumes },
+      voice: { enabled: saved.voiceEnabled, inputDeviceId: saved.voiceInputDeviceId, inputVolume: saved.voiceInputVolume, noiseSuppression: saved.voiceNoiseSuppression, suppressionStrength: saved.voiceSuppressionStrength, echoCancellation: saved.voiceEchoCancellation, autoGainControl: saved.voiceAutoGainControl, noiseGate: saved.voiceNoiseGate, autoInputSensitivity: saved.voiceAutoInputSensitivity, inputSensitivity: saved.voiceInputSensitivity, participantVolumes, muted: voicePreference.muted, deafened: voicePreference.deafened },
       media: { video, audioRack },
       hooks,
     })
@@ -475,6 +527,7 @@ async function connect(channelId: string): Promise<boolean> {
   currentRoom = channelId
   hideLocalPreview = false
   applySavedStreamSettings()
+  chat.setParticipants(participants)
   clearNote(stageNote); renderRooms(); renderMembers(); renderChrome()
   zodiak.voiceChanged()
   return true
@@ -651,6 +704,7 @@ function renderChrome(): void {
   syncVoiceUI()
   if (joiningSession) return
   const inRoom = currentRoom !== null
+  chat.setRoom(inRoom)
   const localStream = streams.find((stream) => stream.local)
   const visibleStreams = streams.filter((stream) => !hideLocalPreview || !stream.local)
   document.body.classList.toggle('in-room', inRoom)
@@ -1004,6 +1058,13 @@ function renderMembers(): void {
         toggleParticipantAudio(participant.id)
       })
       actions.append(mute)
+      const whisper = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-button member-whisper', innerHTML: icon('chat') })
+      whisper.dataset.whisper = participant.id
+      labelButton(whisper, `Whisper to ${participant.name}`)
+      const unread = chat.unreadFor(participant.id)
+      if (unread) whisper.append(Object.assign(document.createElement('span'), { className: 'chat-badge', textContent: unread > 99 ? '+99' : String(unread) }))
+      whisper.addEventListener('click', (event) => { event.stopPropagation(); chat.whisper(participant.id) })
+      actions.append(whisper)
     }
     member.append(actions)
     membersList.append(member)
@@ -1084,22 +1145,28 @@ function syncParticipantAudio(): void {
 
 function syncVoiceUI(): void {
   const available = Boolean(currentRoom) && connection === 'connected' && voiceState.enabled
+  // Outside a call the buttons change the saved choice that the next call starts with.
+  const inCall = inVoiceCall()
+  const enabled = inCall ? voiceState.enabled : savedConfig?.voiceEnabled !== false
+  const muted = displayedMuted()
+  const deafened = displayedDeafened()
+  const disabled = inCall ? !available || voiceState.busy || loopbackRequested : !enabled || joining
   for (const id of ['voice-mute', 'voice-focus-mute']) {
     const button = byId(id, HTMLButtonElement)
-    button.disabled = !available || voiceState.busy || loopbackRequested
-    button.classList.toggle('is-deafened', voiceState.deafened)
-    button.classList.toggle('is-muted', voiceState.muted)
-    setButtonIcon(button, voiceState.muted ? 'mic-off' : 'mic')
-    button.setAttribute('aria-pressed', String(voiceState.muted))
-    labelButton(button, !voiceState.enabled ? 'Voice chat disabled in settings' : voiceState.deafened ? 'Unmute microphone and undeafen' : voiceState.muted ? 'Unmute microphone' : 'Mute microphone')
+    button.disabled = disabled
+    button.classList.toggle('is-deafened', deafened)
+    button.classList.toggle('is-muted', muted)
+    setButtonIcon(button, muted ? 'mic-off' : 'mic')
+    button.setAttribute('aria-pressed', String(muted))
+    labelButton(button, !enabled ? 'Voice chat disabled in settings' : deafened ? 'Unmute microphone and undeafen' : muted ? 'Unmute microphone' : 'Mute microphone')
   }
   for (const id of ['voice-deafen', 'voice-focus-deafen']) {
     const button = byId(id, HTMLButtonElement)
-    button.disabled = !available || voiceState.busy || loopbackRequested
-    button.classList.toggle('is-muted', voiceState.deafened)
-    setButtonIcon(button, voiceState.deafened ? 'headphones-off' : 'headphones')
-    button.setAttribute('aria-pressed', String(voiceState.deafened))
-    labelButton(button, !voiceState.enabled ? 'Voice chat disabled in settings' : voiceState.deafened ? 'Undeafen' : 'Deafen')
+    button.disabled = disabled
+    button.classList.toggle('is-muted', deafened)
+    setButtonIcon(button, deafened ? 'headphones-off' : 'headphones')
+    button.setAttribute('aria-pressed', String(deafened))
+    labelButton(button, !enabled ? 'Voice chat disabled in settings' : deafened ? 'Undeafen' : 'Deafen')
   }
   for (const member of membersList.querySelectorAll<HTMLElement>('[data-participant-id]')) {
     const state = voiceState.participants.find(person => person.id === member.dataset.participantId)
@@ -1155,6 +1222,93 @@ function syncVoiceUI(): void {
   elementById('profile-avatar').classList.toggle('is-speaking', local?.speaking === true)
   elementById('profile-name').classList.toggle('is-speaking', local?.speaking === true)
   syncParticipantAudio()
+}
+
+function inVoiceCall(): boolean { return Boolean(currentRoom) && connection === 'connected' }
+function displayedMuted(): boolean { return inVoiceCall() ? voiceState.muted : voicePreference.muted || voicePreference.deafened }
+function displayedDeafened(): boolean { return inVoiceCall() ? voiceState.deafened : voicePreference.deafened }
+
+function loadVoicePreference(): { muted: boolean; deafened: boolean } {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(VOICE_INPUT_KEY) ?? 'null')
+    if (saved && typeof saved === 'object') {
+      const { muted, deafened } = saved as Record<string, unknown>
+      return { muted: muted !== false, deafened: deafened === true }
+    }
+  } catch { /* Fall back to joining muted. */ }
+  return { muted: true, deafened: false }
+}
+
+function saveVoicePreference(next: { muted: boolean; deafened: boolean }): void {
+  voicePreference = next
+  try { localStorage.setItem(VOICE_INPUT_KEY, JSON.stringify(next)) } catch { /* Kept for this session. */ }
+}
+
+/** Unmuting also undeafens, like the buttons in a call. */
+function toggleMute(): void {
+  if (savedConfig?.voiceEnabled === false || loopbackRequested) return
+  const muted = !displayedMuted()
+  saveVoicePreference({ muted, deafened: muted ? voicePreference.deafened : false })
+  if (inVoiceCall()) void changeVoice(() => setVoiceMuted(muted))
+  else syncVoiceUI()
+}
+
+function toggleDeafen(): void {
+  if (savedConfig?.voiceEnabled === false || loopbackRequested) return
+  const deafened = !displayedDeafened()
+  saveVoicePreference({ ...voicePreference, deafened })
+  if (inVoiceCall()) void changeVoice(() => setVoiceDeafened(deafened))
+  else syncVoiceUI()
+}
+
+function renderKeybinds(): void {
+  for (const action of KEYBIND_ACTIONS) {
+    const button = byId(`keybind-${action}`, HTMLButtonElement)
+    const recording = recordingKeybind === action
+    button.textContent = recording ? 'Press keys…' : formatAccelerator(keybindDraft[action])
+    button.classList.toggle('is-recording', recording)
+    button.classList.toggle('is-empty', !recording && !keybindDraft[action])
+    button.setAttribute('aria-pressed', String(recording))
+  }
+}
+
+function showKeybindNote(message: string, tone: 'error' | 'info'): void {
+  keybindNote.hidden = false
+  keybindNote.textContent = message
+  keybindNote.dataset.tone = tone
+}
+
+function startKeybindRecording(action: KeybindAction): void {
+  if (recordingKeybind === action) { stopKeybindRecording(); return }
+  recordingKeybind = action
+  keybindNote.hidden = true
+  // The saved keybinds would take the keys before this window sees them.
+  window.sharescreen.pauseKeybinds(true)
+  renderKeybinds()
+}
+
+function stopKeybindRecording(): void {
+  if (!recordingKeybind) return
+  keybindStopped = { action: recordingKeybind, at: performance.now() }
+  recordingKeybind = null
+  window.sharescreen.pauseKeybinds(false)
+  renderKeybinds()
+}
+
+function recordKeybind(event: KeyboardEvent): void {
+  const action = recordingKeybind
+  if (!action) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (event.key === 'Escape' && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) { stopKeybindRecording(); return }
+  const recorded = acceleratorFromKey(event)
+  if (!recorded) return
+  if ('error' in recorded) { showKeybindNote(recorded.error, 'error'); return }
+  const other = KEYBIND_ACTIONS.find((candidate) => candidate !== action && keybindDraft[candidate] === recorded.accelerator)
+  if (other) { showKeybindNote(`This keybind is already used to ${other}.`, 'error'); return }
+  keybindDraft = { ...keybindDraft, [action]: recorded.accelerator }
+  keybindNote.hidden = true
+  stopKeybindRecording()
 }
 
 async function changeVoice(action: () => Promise<void>): Promise<void> {
@@ -1476,7 +1630,7 @@ async function persistConfig(): Promise<AppConfig | null> {
     fillForm(saved.value); return saved.value
   } catch (error) { showNote(settingsNote, messageOf(error), 'error'); return null }
 }
-function readForm(): AppConfig { return { displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: 'stable', hardwareAcceleration: hardwareAccelerationInput.checked, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100, voiceEchoCancellation: echoCancellationInput.checked, voiceAutoGainControl: autoGainControlInput.checked, voiceNoiseGate: noiseGateInput.checked, voiceAutoInputSensitivity: autoSensitivityInput.checked, voiceInputSensitivity: Number(sensitivityInput.value) } }
+function readForm(): AppConfig { return { displayName: nameInput.value, showStreamStatistics: showStreamStatisticsInput.checked, checkForUpdatesOnStartup: checkForUpdatesOnStartupInput.checked, updateChannel: 'stable', hardwareAcceleration: hardwareAccelerationInput.checked, showChatBubbles: showChatBubblesInput.checked, keybinds: { ...keybindDraft }, voiceEnabled: voiceEnabledInput.checked, voiceInputDeviceId: voiceInput.value || 'default', voiceInputVolume: Number(voiceInputVolume.value) / 100, voiceNoiseSuppression: noiseSuppressionInput.checked, voiceSuppressionStrength: Number(suppressionStrengthInput.value) / 100, voiceEchoCancellation: echoCancellationInput.checked, voiceAutoGainControl: autoGainControlInput.checked, voiceNoiseGate: noiseGateInput.checked, voiceAutoInputSensitivity: autoSensitivityInput.checked, voiceInputSensitivity: Number(sensitivityInput.value) } }
 function fillForm(config: AppConfig): void {
   savedConfig = config
   nameInput.value = config.displayName
@@ -1494,6 +1648,10 @@ function fillForm(config: AppConfig): void {
   // updateChannelInput.value = config.updateChannel === 'beta' ? 'beta' : 'stable'
   hardwareAccelerationInput.checked = config.hardwareAcceleration !== false
   showStreamStatisticsInput.checked = showStatistics
+  showChatBubblesInput.checked = config.showChatBubbles === true
+  chat.configure(showChatBubblesInput.checked)
+  keybindDraft = { ...config.keybinds }
+  renderKeybinds()
   voiceEnabledInput.checked = config.voiceEnabled !== false
   echoCancellationInput.checked = config.voiceEchoCancellation !== false
   autoGainControlInput.checked = config.voiceAutoGainControl === true
@@ -1516,6 +1674,7 @@ function fillForm(config: AppConfig): void {
 }
 function openSettings(): void {
   clearNote(settingsNote)
+  keybindNote.hidden = true
   selectSettingsTab('account')
   if (!settingsDialog.open) settingsDialog.showModal()
   setVoiceInputLevelReporting(true)
@@ -1524,6 +1683,7 @@ function openSettings(): void {
 }
 function selectSettingsTab(name: string): void {
   if (name !== 'audio') stopMicrophoneTest()
+  if (name !== 'keybinds') stopKeybindRecording()
   settingsDialog.querySelectorAll<HTMLButtonElement>('[data-settings-tab]').forEach(tab => {
     const selected = tab.dataset.settingsTab === name
     tab.setAttribute('aria-selected', String(selected))

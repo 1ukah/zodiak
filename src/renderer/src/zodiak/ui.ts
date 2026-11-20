@@ -83,7 +83,7 @@ export class ZodiakUi {
   private signedIn = false
   private authMode: 'login' | 'register' = 'login'
   private readonly text: TextChannelView
-  private channelDialogTarget: { guildId: Id; channel?: Channel } | null = null
+  private channelDialogTarget: { guildId: Id; kind: ChannelKind; channel?: Channel } | null = null
   private confirmAction: (() => Promise<void>) | null = null
 
   private readonly rail = el('room-list', HTMLDivElement)
@@ -138,6 +138,11 @@ export class ZodiakUi {
 
   savedPeople(): PersonSettings[] {
     return this.store.savedPeople()
+  }
+
+  /** True when the user can send this person a private message. */
+  sharesServer(userId: Id): boolean {
+    return this.store.guilds.some((g) => g.members.some((m) => m.user.id === userId))
   }
 
   /** Shows the change at once and saves it shortly after the last change. */
@@ -474,7 +479,7 @@ export class ZodiakUi {
       }
       actions.append(status)
       // Keeps the icons where the per-person volume button sits once you join.
-      if (!local) actions.append(Object.assign(document.createElement('span'), { className: 'member-voice-mute-space' }))
+      if (!local) actions.append(Object.assign(document.createElement('span'), { className: 'member-voice-mute-space' }), Object.assign(document.createElement('span'), { className: 'member-whisper-space' }))
       member.append(actions)
       list.append(member)
     }
@@ -535,11 +540,6 @@ export class ZodiakUi {
 
     el('guild-settings', HTMLButtonElement).addEventListener('click', () => this.openGuildSettings())
     el('guild-settings-form', HTMLFormElement).addEventListener('submit', (event) => { event.preventDefault(); void this.renameGuild() })
-    el('guild-add-channel', HTMLButtonElement).addEventListener('click', () => {
-      const snapshot = this.store.guild(this.guildId)
-      el('guild-settings-dialog', HTMLDialogElement).close()
-      if (snapshot) this.openChannelDialog(snapshot, undefined, 'text')
-    })
     el('guild-delete', HTMLButtonElement).addEventListener('click', () => {
       const snapshot = this.store.guild(this.guildId)
       if (!snapshot) return
@@ -694,11 +694,10 @@ export class ZodiakUi {
   }
 
   private openChannelDialog(snapshot: GuildSnapshot, channel?: Channel, kind: ChannelKind = 'text'): void {
-    this.channelDialogTarget = { guildId: snapshot.guild.id, channel }
-    el('channel-dialog-title', HTMLHeadingElement).textContent = channel ? 'Edit channel' : 'Create channel'
+    // The kind comes from the + button that was clicked; it cannot be changed here.
+    this.channelDialogTarget = { guildId: snapshot.guild.id, kind: channel?.kind ?? kind, channel }
+    el('channel-dialog-title', HTMLHeadingElement).textContent = channel ? 'Edit channel' : kind === 'voice' ? 'Create voice channel' : 'Create text channel'
     el('channel-name', HTMLInputElement).value = channel?.name ?? ''
-    el('channel-kind', HTMLSelectElement).value = channel?.kind ?? kind
-    el('channel-kind-field', HTMLLabelElement).hidden = Boolean(channel)
     el('channel-delete', HTMLButtonElement).hidden = !channel
     el('channel-save', HTMLButtonElement).textContent = channel ? 'Save' : 'Create'
     clearNote(el('channel-note', HTMLParagraphElement))
@@ -716,8 +715,7 @@ export class ZodiakUi {
       if (target.channel) {
         await api('PATCH', `/v1/channels/${target.channel.id}`, { name })
       } else {
-        const kind = el('channel-kind', HTMLSelectElement).value === 'voice' ? 'voice' : 'text'
-        const channel = await api<Channel>('POST', `/v1/guilds/${target.guildId}/channels`, { name, kind })
+        const channel = await api<Channel>('POST', `/v1/guilds/${target.guildId}/channels`, { name, kind: target.kind })
         this.store.apply({ t: 'CHANNEL_CREATE', d: channel })
         if (channel.kind === 'text') await this.selectChannel(channel)
       }

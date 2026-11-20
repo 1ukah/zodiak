@@ -2600,6 +2600,7 @@ body.view-text #text-view { display: flex; }
 #channel-list #members-list { overflow: visible; }
 .voice-members, #channel-list #members-list { margin: 2px 0 6px; padding-left: 16px; }
 .member-voice-mute-space { flex: none; width: 22px; height: 24px; }
+.member-whisper-space { flex: none; width: 25px; height: 25px; }
 #channel-list .member-voice-status { color: #ee7885; }
 
 /* Server members on the right of text channels. */
@@ -2619,3 +2620,15 @@ body.members-hidden #member-list { display: none; }
 .presence-dot.is-online { background: var(--green); }
 .member-owner { flex: none; color: #c9a94f; font-size: 10px; }
 @media (max-width: 900px) { #member-list { display: none; } }
+
+/* Keybinds settings. */
+.keybind-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; color: #b5b6c5; }
+.keybind-row > span { flex: 1; min-width: 0; }
+.keybind-button { min-width: 150px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 7px; background: #202127; color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
+.keybind-button:hover { border-color: #70699c; }
+.keybind-button.is-recording { border-color: var(--accent); color: var(--accent); background: #2a273c; }
+.keybind-button.is-empty { color: var(--muted); }
+.keybind-clear { width: 28px; height: 28px; }
+.keybind-clear .icon { width: 14px; height: 14px; }
+#keybind-note { margin-top: 12px; }
+#keybind-note[data-tone=error] { color: #ee7885; }

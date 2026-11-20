@@ -19,6 +19,8 @@ export interface AppConfig {
   updateChannel: UpdateChannel
   /** Uses the GPU for rendering and video encode/decode; off forces CPU. Applies after a restart. */
   hardwareAcceleration: boolean
+  /** Previews private messages while the chat is hidden. */
+  showChatBubbles: boolean
   voiceEnabled: boolean
   voiceInputDeviceId: string
   voiceInputVolume: number
@@ -29,7 +31,15 @@ export interface AppConfig {
   voiceNoiseGate: boolean
   voiceAutoInputSensitivity: boolean
   voiceInputSensitivity: number
+  keybinds: Keybinds
 }
+
+export type KeybindAction = 'mute' | 'deafen'
+
+/** Electron accelerators, for example `Ctrl+Shift+M`. An empty string means no keybind. */
+export type Keybinds = Record<KeybindAction, string>
+
+export const KEYBIND_ACTIONS: readonly KeybindAction[] = ['mute', 'deafen']
 
 export interface DesktopSourceInfo {
   id: string
@@ -132,6 +142,9 @@ export const channels = {
   windowVisibilityChanged: 'window:visibility-changed',
   restartRequired: 'app:restart-required',
   relaunchApp: 'app:relaunch',
+  keybindPressed: 'keybind:pressed',
+  keybindsFailed: 'keybind:failed',
+  pauseKeybinds: 'keybind:pause',
 } as const
 
 export interface SharescreenApi {
@@ -156,4 +169,9 @@ export interface SharescreenApi {
   onWindowVisibilityChanged: (listener: (visible: boolean) => void) => () => void
   onRestartRequired: (listener: (hardwareAcceleration: boolean) => void) => () => void
   relaunchApp: () => Promise<void>
+  onKeybind: (listener: (action: KeybindAction) => void) => () => void
+  /** Keybinds that could not be registered, for example because another app uses them. */
+  onKeybindsFailed: (listener: (actions: KeybindAction[]) => void) => () => void
+  /** Stops the keybinds while the user records a new one. */
+  pauseKeybinds: (paused: boolean) => void
 }

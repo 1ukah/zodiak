@@ -24,7 +24,7 @@ export interface VoiceState {
   inputLevel?: InputLevel
 }
 
-export interface VoiceSettings extends NoiseGateSettings { enabled: boolean; inputDeviceId: string; inputVolume?: number; noiseSuppression?: boolean; suppressionStrength?: number; echoCancellation?: boolean; autoGainControl?: boolean; participantVolumes?: Record<string, number> }
+export interface VoiceSettings extends NoiseGateSettings { enabled: boolean; inputDeviceId: string; inputVolume?: number; noiseSuppression?: boolean; suppressionStrength?: number; echoCancellation?: boolean; autoGainControl?: boolean; participantVolumes?: Record<string, number>; muted?: boolean; deafened?: boolean }
 
 interface VoicePlayback {
   track: MediaStreamTrack
@@ -86,6 +86,9 @@ export class RoomVoice {
     private onState: (state: VoiceState) => void, private onBlocked: (blocked: boolean) => void,
     private playbackContext?: () => AudioContext) {
     this.enabled = settings.enabled
+    // Starts the call with the microphone and headphone state the user chose last.
+    this.muted = settings.muted !== false
+    this.deafened = settings.deafened === true
     this.inputDeviceId = settings.inputDeviceId
     this.inputVolume = Math.max(0, Math.min(1, settings.inputVolume ?? 1))
     this.noiseSuppression = settings.noiseSuppression !== false
