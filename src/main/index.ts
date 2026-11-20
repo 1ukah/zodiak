@@ -389,7 +389,8 @@ function registerIpc(): void {
 
 function registerPermissions(): void {
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
-    callback(permission === 'media' || permission === 'display-capture' || permission === 'speaker-selection')
+    // clipboard-sanitized-write lets the renderer copy text (invite codes); reading the clipboard stays denied.
+    callback(permission === 'media' || permission === 'display-capture' || permission === 'speaker-selection' || permission === 'clipboard-sanitized-write')
   })
   registerCaptureHandler()
 }

@@ -46,8 +46,24 @@ async function main() {
   await started
   p.stdout.write(Buffer.from([1, 2, 3, 4]))
   assert.equal(h.messages[0][0], 'audio:data')
-  p.exitCode = 1; p.emit('exit', 1, null)
+  // A crash mid-share restarts the helper quietly, a few times; after that the renderer hears about it.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const crashed = h.procs.length
+    p.exitCode = 3221225477; p.emit('exit', 3221225477, null)
+    assert.equal(h.procs.length, crashed + 1, 'A crashed helper restarts')
+    assert.notEqual(h.messages.at(-1)[0], 'audio:error')
+    p = h.procs.at(-1)
+    assert.deepEqual(p.args, ['123', 'discord'])
+    p.stderr.write('ready 48000 2 s16le\n')
+  }
+  const before = h.messages.length
+  h.procs.at(-2).stdout.write(Buffer.from([9, 9]))
+  assert.equal(h.messages.length, before, 'Replaced helpers cannot send late PCM')
+  p.stdout.write(Buffer.from([5, 6]))
+  assert.equal(h.messages.at(-1)[0], 'audio:data')
+  p.exitCode = 3221225477; p.emit('exit', 3221225477, null)
   assert.equal(h.messages.at(-1)[0], 'audio:error')
+  assert.match(h.messages.at(-1)[1], /0xC0000005/)
   assert.equal(h.sender.listenerCount('destroyed'), 0)
   started = h.api.startSystemAudio(h.sender, false)
   const rejection = assert.rejects(started, /cancelled/)
@@ -76,6 +92,6 @@ async function main() {
   assert.deepEqual(p.args, ['123', 'discord'])
   p.stderr.write('ready 48000 2 s16le\n'); await started
   windows.api.stopSystemAudio()
-  console.log('PASS Linux availability, helper selection, split readiness, PCM forwarding, runtime failure, startup failure, cancellation, owner cleanup, Windows dispatch')
+  console.log('PASS Linux availability, helper selection, split readiness, PCM forwarding, crash restarts, runtime failure, startup failure, cancellation, owner cleanup, Windows dispatch')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

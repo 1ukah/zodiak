@@ -104,8 +104,12 @@
   <dialog id="invite-dialog" class="dialog small-dialog" aria-labelledby="invite-title">
     <div class="dialog-content">
       <div class="panel-head"><h2 id="invite-title">Invite people</h2><button class="icon-button" type="button" data-close="invite-dialog" title="Close" aria-label="Close"><span data-icon="close"></span></button></div>
-      <p class="dialog-description">Share this code. It works for 7 days.</p>
-      <div class="create-input-row"><input id="invite-code" type="text" readonly aria-label="Invite code" spellcheck="false" /><button id="invite-copy" class="primary icon-action" type="button" title="Copy invite code" aria-label="Copy invite code"><span data-icon="copy"></span></button></div>
+      <p id="invite-details" class="dialog-description">Share this code.</p>
+      <div class="create-input-row invite-code-row"><input id="invite-code" type="text" readonly aria-label="Invite code" spellcheck="false" /><button id="invite-copy" class="primary icon-action" type="button" title="Copy invite code" aria-label="Copy invite code" disabled><span data-icon="copy"></span></button></div>
+      <form id="invite-form" class="invite-form">
+        <div class="quality-grid"><label class="field" for="invite-expires">Expire after<select id="invite-expires"><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="21600">6 hours</option><option value="43200">12 hours</option><option value="86400">1 day</option><option value="604800" selected>7 days</option><option value="2592000">30 days</option><option value="never">Never</option></select></label><label class="field" for="invite-max-uses">Max uses<select id="invite-max-uses"><option value="none" selected>No limit</option><option value="1">1 use</option><option value="5">5 uses</option><option value="10">10 uses</option><option value="25">25 uses</option><option value="50">50 uses</option><option value="100">100 uses</option></select></label></div>
+        <button id="invite-create" class="ghost" type="submit">Create new invite</button>
+      </form>
       <p id="invite-note" class="note" role="status" hidden></p>
     </div>
   </dialog>

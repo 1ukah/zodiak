@@ -2588,6 +2588,8 @@ body.view-text #text-view { display: flex; }
 #text-input::placeholder { color: #757786; }
 .dialog-form .create-input-row { margin-top: 6px; }
 .dialog-form .create-input-row input { flex: 1; min-width: 0; }
+.invite-code-row input { flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace; letter-spacing: .5px; }
+.invite-form { display: grid; gap: 14px; border-top: 1px solid var(--line); padding-top: 20px; }
 .account-actions { justify-content: flex-start; }
 .account-actions .icon { width: 16px; height: 16px; }
 /* People in a voice channel use the original voice panel design (.member rows). The panel

@@ -1,4 +1,4 @@
-import type { Channel, ChannelKind, GuildSnapshot, Invite, Id, PersonSettings, UpdatePersonSettingsRequest, User, UserSettings } from '../../../shared/protocol'
+import type { Channel, ChannelKind, CreateInviteRequest, GuildSnapshot, Invite, Id, PersonSettings, UpdatePersonSettingsRequest, User, UserSettings } from '../../../shared/protocol'
 import type { GatewayState } from '../../../shared/zodiak'
 import { makeAvatar } from '../avatar'
 import { icon, labelButton } from '../icons'
@@ -24,7 +24,6 @@ export interface VoiceBridge {
 const SETTINGS_SAVE_DELAY_MS = 400
 
 type View = 'text' | 'voice'
-const INVITE_LIFETIME_SECONDS = 7 * 24 * 60 * 60
 const SELECTION_KEY = 'zodiak.selection'
 
 function el<T extends HTMLElement>(id: string, type: new () => T): T {
@@ -55,6 +54,22 @@ export function guildInitials(name: string): string {
 export function parseInviteCode(value: string): string | null {
   const match = value.trim().match(/([A-Za-z0-9]{10})\s*$/)
   return match ? match[1] : null
+}
+
+function remaining(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000))
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'}`
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'}`
+  const days = Math.round(hours / 24)
+  return `${days} days`
+}
+
+/** One line about how long and how often an invite still works. */
+export function inviteDetails(invite: Invite, now = Date.now()): string {
+  const expires = invite.expires_at ? `Expires in ${remaining(Date.parse(invite.expires_at) - now)}` : 'Never expires'
+  const uses = invite.max_uses === null ? 'no use limit' : `${invite.uses} of ${invite.max_uses} use${invite.max_uses === 1 ? '' : 's'}`
+  return `${expires}, ${uses}.`
 }
 
 export class ZodiakUi {
@@ -514,14 +529,9 @@ export class ZodiakUi {
     el('guild-create-form', HTMLFormElement).addEventListener('submit', (event) => { event.preventDefault(); void this.createGuild() })
     el('guild-join-form', HTMLFormElement).addEventListener('submit', (event) => { event.preventDefault(); void this.joinGuild() })
 
-    el('guild-invite', HTMLButtonElement).addEventListener('click', () => void this.createInvite())
-    el('invite-copy', HTMLButtonElement).addEventListener('click', () => {
-      const code = el('invite-code', HTMLInputElement).value
-      void navigator.clipboard.writeText(code).then(
-        () => showNote(el('invite-note', HTMLParagraphElement), 'Copied.', 'info'),
-        () => showNote(el('invite-note', HTMLParagraphElement), 'Could not copy. Select the code and copy it.'),
-      )
-    })
+    el('guild-invite', HTMLButtonElement).addEventListener('click', () => void this.openInvite())
+    el('invite-copy', HTMLButtonElement).addEventListener('click', () => void this.copyInvite())
+    el('invite-form', HTMLFormElement).addEventListener('submit', (event) => { event.preventDefault(); void this.createInvite() })
 
     el('guild-settings', HTMLButtonElement).addEventListener('click', () => this.openGuildSettings())
     el('guild-settings-form', HTMLFormElement).addEventListener('submit', (event) => { event.preventDefault(); void this.renameGuild() })
@@ -597,19 +607,67 @@ export class ZodiakUi {
     }
   }
 
+  /** Shows the server's newest working invite, or creates one when there is none. */
+  private async openInvite(): Promise<void> {
+    const guildId = this.guildId
+    if (!guildId) return
+    const note = el('invite-note', HTMLParagraphElement)
+    this.showInvite(null)
+    clearNote(note)
+    el('invite-dialog', HTMLDialogElement).showModal()
+    try {
+      const current = await api<Invite | null>('GET', `/v1/guilds/${guildId}/invites/current`).catch((error) => {
+        // Servers before the current-invite route answer 404; create one as before.
+        if ((error as { status?: number }).status === 404) return null
+        throw error
+      })
+      if (this.guildId !== guildId) return
+      if (current) this.showInvite(current)
+      else await this.createInvite()
+    } catch (error) { showNote(note, errorText(error)) }
+  }
+
   private async createInvite(): Promise<void> {
-    if (!this.guildId) return
-    const dialog = el('invite-dialog', HTMLDialogElement)
+    const guildId = this.guildId
+    if (!guildId) return
+    const note = el('invite-note', HTMLParagraphElement)
+    const button = el('invite-create', HTMLButtonElement)
+    const expires = el('invite-expires', HTMLSelectElement).value
+    const uses = el('invite-max-uses', HTMLSelectElement).value
+    const request: CreateInviteRequest = {}
+    if (expires !== 'never') request.expires_in_seconds = Number(expires)
+    if (uses !== 'none') request.max_uses = Number(uses)
+    clearNote(note)
+    button.disabled = true
+    try {
+      const invite = await api<Invite>('POST', `/v1/guilds/${guildId}/invites`, request)
+      if (this.guildId === guildId) this.showInvite(invite)
+    } catch (error) {
+      showNote(note, errorText(error))
+    } finally {
+      button.disabled = false
+    }
+  }
+
+  private showInvite(invite: Invite | null): void {
+    const code = el('invite-code', HTMLInputElement)
+    code.value = invite?.code ?? ''
+    el('invite-copy', HTMLButtonElement).disabled = !invite
+    el('invite-details', HTMLParagraphElement).textContent = invite ? inviteDetails(invite) : 'Loading invite…'
+    if (invite) code.select()
+  }
+
+  private async copyInvite(): Promise<void> {
     const code = el('invite-code', HTMLInputElement)
     const note = el('invite-note', HTMLParagraphElement)
-    code.value = ''
-    clearNote(note)
-    dialog.showModal()
+    if (!code.value) return
     try {
-      const invite = await api<Invite>('POST', `/v1/guilds/${this.guildId}/invites`, { expires_in_seconds: INVITE_LIFETIME_SECONDS })
-      code.value = invite.code
+      await navigator.clipboard.writeText(code.value)
+    } catch {
       code.select()
-    } catch (error) { showNote(note, errorText(error)) }
+      if (!document.execCommand('copy')) return showNote(note, 'Could not copy. Select the code and copy it.')
+    }
+    showNote(note, 'Copied.', 'info')
   }
 
   private openGuildSettings(): void {
