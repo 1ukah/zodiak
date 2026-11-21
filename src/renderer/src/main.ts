@@ -10,7 +10,7 @@ import { hydrateIcons, icon, labelButton, setButtonIcon } from './icons'
 import { configureVoice, setVoiceInputVolume, setVoiceMuted, setVoiceDeafened, setVoiceParticipantMuted, setVoiceParticipantVolume, setMicrophoneTestActive } from './session-loader'
 import type { VoiceState } from './voice'
 import type { LoopbackSettings, MicrophoneLoopback } from './microphone-loopback'
-import { setViewerVisible, setVoiceInputLevelReporting } from './session-loader'
+import { setViewerFocused, setViewerVisible, setVoiceInputLevelReporting } from './session-loader'
 import { initializeUpdateUI } from './update-ui'
 
 hydrateIcons()
@@ -455,6 +455,10 @@ function bind(): void {
     byId('restart-message', HTMLParagraphElement).textContent = `Restart required to ${hardwareAcceleration ? 'enable' : 'disable'} hardware acceleration.`
     if (!restartDialog.open) restartDialog.showModal()
   })
+  // A game in front gets the GPU and CPU: zodiak stops drawing what nobody is looking at.
+  window.addEventListener('blur', () => setViewerFocused(false))
+  window.addEventListener('focus', () => setViewerFocused(true))
+  setViewerFocused(document.hasFocus())
   window.sharescreen.onWindowVisibilityChanged?.((visible) => {
     setViewerVisible(visible)
     document.body.classList.toggle('window-hidden', !visible)

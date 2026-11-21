@@ -116,12 +116,18 @@ export class RoomVoice {
     this.sync()
   }
 
-  /** Speaking indicators are not visible while minimized; stop polling the analysers. */
+  /** Speaking indicators are not watched while minimized or while a game has focus; stop polling the analysers. */
   setVisible(visible: boolean): void {
     if (this.visible === visible || this.closed) return
     this.visible = visible
     if (visible) { this.startMeters(); this.emit() }
-    else this.stopMeters()
+    else {
+      this.stopMeters()
+      // Clear the indicators once, so nobody stays shown as speaking while paused.
+      this.localActiveUntil = 0
+      for (const meter of this.meters.values()) meter.activeUntil = 0
+      this.emit()
+    }
   }
 
   /** The live input level is only shown in settings; omit it otherwise so it cannot re-render the room UI. */
@@ -412,7 +418,7 @@ export class RoomVoice {
   private localState(): VoiceParticipant {
     const now = performance.now()
     const active = this.enabled && !this.muted && !this.deafened && !this.testing && Boolean(this.capture)
-    const rms = active ? this.capture?.processor.getOutputRms() ?? 0 : 0
+    const rms = active && this.visible ? this.capture?.processor.getOutputRms() ?? 0 : 0
     this.localActiveUntil = voiceActiveUntil(rms, this.localActiveUntil, now)
     return {
       id: this.connection.userId, enabled: this.enabled, muted: !active, deafened: this.deafened || this.testing,
@@ -430,7 +436,7 @@ export class RoomVoice {
     if (meter) {
       const now = performance.now()
       let rms = 0
-      if (!muted && this.enabled && !this.deafened && !this.testing && !locallyMuted && this.playbackVolume(id) > 0 && !this.audio.get(id)?.element.paused) {
+      if (this.visible && !muted && this.enabled && !this.deafened && !this.testing && !locallyMuted && this.playbackVolume(id) > 0 && !this.audio.get(id)?.element.paused) {
         meter.analyser.getFloatTimeDomainData(meter.samples)
         rms = Math.sqrt(meter.samples.reduce((sum, value) => sum + value * value, 0) / meter.samples.length)
       }

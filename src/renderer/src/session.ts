@@ -121,6 +121,7 @@ const lastStats = new Map<string, CounterSample>()
 let telemetryInFlight = false
 let telemetryEnabled = false
 let viewerVisible = true
+let viewerFocused = true
 let voiceInputLevelReporting = false
 const nameCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
 
@@ -134,7 +135,17 @@ export async function setVoiceMuted(muted: boolean): Promise<void> { await voice
 export async function setVoiceDeafened(deafened: boolean): Promise<void> { await voice?.setDeafened(deafened) }
 export function setVoiceParticipantMuted(id: string, muted: boolean): void { voice?.setParticipantMuted(id, muted) }
 export function setVoiceParticipantVolume(id: string, volume: number): void { voice?.setParticipantVolume(id, volume) }
-export function setViewerVisible(visible: boolean): void { viewerVisible = visible; voice?.setVisible(visible) }
+export function setViewerVisible(visible: boolean): void { viewerVisible = visible; applyViewerActivity() }
+/** While another app (a game) has focus, the speaking meters, statistics and the preview of your own screen pause. */
+export function setViewerFocused(focused: boolean): void { viewerFocused = focused; applyViewerActivity() }
+
+function viewerActive(): boolean { return viewerVisible && viewerFocused }
+
+function applyViewerActivity(): void {
+  voice?.setVisible(viewerActive())
+  attachSelectedVideo()
+  syncGridVideos()
+}
 export function setVoiceInputLevelReporting(enabled: boolean): void { voiceInputLevelReporting = enabled; voice?.setInputLevelReporting(enabled) }
 
 /** Screen audio and voice share one playback context and audio thread. */
@@ -190,7 +201,7 @@ export async function joinRoom(args: {
     state => { if (connection === next) hooks?.onVoice?.(state) },
     blocked => { voiceAudioBlocked = blocked; notifyAudioBlocked() },
     playbackContext)
-  voice.setVisible(viewerVisible)
+  voice.setVisible(viewerActive())
   voice.setInputLevelReporting(voiceInputLevelReporting)
   try {
     await voice.setOutputDevice(remoteAudioOutputDeviceId || 'default')
@@ -472,15 +483,17 @@ function attachSelectedVideo(): void {
   const media = targets
   if (!media) return
   const user = selectedStreamId ? userOf(selectedStreamId) : null
-  const visible = stageVideoVisible && user && (selectedStreamId?.startsWith('local:') || watching.has(user))
-  attach(media.video, visible && user ? screenTrack(user) : undefined, selectedStreamId?.startsWith('local:') ?? false)
+  const local = selectedStreamId?.startsWith('local:') ?? false
+  // The preview of your own screen stops drawing while a game has focus; friends' streams keep playing.
+  const visible = stageVideoVisible && user && (local ? viewerActive() : watching.has(user))
+  attach(media.video, visible && user ? screenTrack(user) : undefined, local)
 }
 
 function syncGridVideos(): void {
   for (const [id, element] of gridTargets) {
     const user = userOf(id)
     const local = id.startsWith('local:')
-    attach(element, user && (local || watching.has(user)) ? screenTrack(user) : undefined, local)
+    attach(element, user && (local ? viewerActive() : watching.has(user)) ? screenTrack(user) : undefined, local)
   }
 }
 
@@ -606,7 +619,7 @@ function startTelemetry(): void {
   if (!telemetryEnabled || !connection) return
   const current = connection
   const collect = (): void => {
-    if (connection !== current || telemetryInFlight || !viewerVisible || document.hidden) return
+    if (connection !== current || telemetryInFlight || !viewerActive() || document.hidden) return
     telemetryInFlight = true
     void collectTelemetry(current).catch(() => undefined).finally(() => { telemetryInFlight = false })
   }

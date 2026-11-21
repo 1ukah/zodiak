@@ -9,6 +9,7 @@ let volume = 1
 let deviceId = 'default'
 let statistics = false
 let viewerVisible = true
+let viewerFocused = true
 let microphoneTestActive = false
 let inputLevelReporting = false
 
@@ -17,6 +18,7 @@ function load(): Promise<Engine> {
     module.setRemoteAudioVolume(volume)
     module.setTelemetryEnabled(statistics)
     module.setViewerVisible(viewerVisible)
+    module.setViewerFocused(viewerFocused)
     module.setVoiceInputLevelReporting(inputLevelReporting)
     await module.setRemoteAudioOutputDevice(deviceId)
     engine = module
@@ -52,6 +54,7 @@ export function setStreamVolume(...args: Parameters<Engine['setStreamVolume']>) 
 export function setRemoteAudioVolume(value: number) { volume = value; engine?.setRemoteAudioVolume(value) }
 export function setTelemetryEnabled(value: boolean) { statistics = value; engine?.setTelemetryEnabled(value) }
 export function setViewerVisible(value: boolean) { viewerVisible = value; engine?.setViewerVisible(value) }
+export function setViewerFocused(value: boolean) { viewerFocused = value; engine?.setViewerFocused(value) }
 export function setVoiceInputLevelReporting(value: boolean) { inputLevelReporting = value; engine?.setVoiceInputLevelReporting(value) }
 export async function setRemoteAudioOutputDevice(value: string) {
   await engine?.setRemoteAudioOutputDevice(value)

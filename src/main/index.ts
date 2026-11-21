@@ -20,6 +20,11 @@ if (process.platform === 'win32') app.setAppUserModelId('app.zodiak')
 // Playing <video> elements otherwise register a Windows media session, so
 // media keys pressed in a game can pause streams instead of the user's player.
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling')
+// A covered or minimized window stops painting (backgroundThrottling), but its
+// process keeps normal priority and its timers keep running, so voice and the
+// voice connection are not slowed down behind a game.
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+app.commandLine.appendSwitch('disable-background-timer-throttling')
 // The frameless window never shows a menu; skip building Electron's default
 // one (and its reload/devtools accelerators) in installed builds.
 if (app.isPackaged) Menu.setApplicationMenu(null)
@@ -144,10 +149,11 @@ function createWindow(splash: BrowserWindow | null = null): void {
       // There is no context menu to apply suggestions, so the spellchecker
       // would only cost memory and per-keystroke work in chat.
       spellcheck: false,
-      // Microphone AudioWorklets and WebRTC must keep their scheduling when
-      // covered, unfocused, or minimized. Native visibility events below still
-      // pause the video UI and background roster/telemetry work explicitly.
-      backgroundThrottling: false,
+      // A window covered by a game stops painting, so it does not compete with
+      // the game for the GPU. Voice keeps running: AudioWorklets and WebRTC use
+      // their own threads, and the switches at the top keep the renderer's
+      // priority and timers (see disable-renderer-backgrounding).
+      backgroundThrottling: true,
     },
   })
 
